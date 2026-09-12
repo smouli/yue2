@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+wandb/
+song.*
+*.mp3
+*.wav
+*.flac
+*.abc
+.claude/settings.local.json
