@@ -35,13 +35,21 @@ rewrite weak lines ← scorers ← YuE2 render (cot="melody", transcribed melody
 
 | Path | What |
 |---|---|
-| `notebook.py` | molab notebook (edited live through `marimo pair`) |
+| `notebook.py` | molab notebook (edited live through `marimo pair`); the demo UI is at the top |
+| `sandbox/loop.py` | the loop: facts, lyric passes, render passes with best-of-N takes, source alignment |
+| `sandbox/singalong.py` | sing-along player widget: highlights the sung line and its source sentence |
 | `sandbox/setup.sh` | one-time install on the molab sandbox |
 | `sandbox/transcribe.sh` | SheetSage2 transcription of the source track |
 | `sandbox/asr_score.py` | intelligibility scorer: Whisper transcript vs intended lyrics, per line |
 | `requests/` | YuE2 song requests (style + lyrics) |
 
 Audio files and transcribed scores of the source track are gitignored and not distributed.
+
+## Demo
+
+In the notebook, paste a URL and press **Make the song**. Progress cards show each render pass
+(heard clearly, facts taught, syllable fit, and every take). When the loop finishes, the player
+highlights each lyric line as it is sung next to the source sentence it teaches.
 
 ## Setup
 
