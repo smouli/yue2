@@ -1,6 +1,7 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
+#     "anywidget==0.11.0",
 #     "openai==3.13.0",
 #     "pronouncing==0.3.0",
 #     "trafilatura==2.2.0",
@@ -17,12 +18,201 @@ app = marimo.App(width="medium", auto_download=["html"])
 @app.cell
 def _():
     import json
+    import os
+    import re
+    import shlex
     import subprocess
+    import sys
+    import time
     from pathlib import Path
 
     import marimo as mo
 
-    return Path, json, mo, subprocess
+    return Path, json, mo, os, re, shlex, subprocess, sys, time
+
+
+@app.cell(hide_code=True)
+def demo_controls(Path, json, mo, sys):
+    DEMO_CODE = "/home/marimo/hack/branches/demo-ui"
+    DEMO_RUNS = Path("/home/marimo/hack/runs")
+    if DEMO_CODE not in sys.path:
+        sys.path.insert(0, DEMO_CODE)
+    import singalong
+
+    get_demo_run, set_demo_run = mo.state(None)
+    get_demo_done, set_demo_done = mo.state(None)
+
+    def _finished_runs():
+        _names = []
+        for _p in sorted(DEMO_RUNS.glob("*.progress.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            _events = json.loads(_p.read_text())
+            if _events and _events[-1]["step"] == "done" and "alignment" in _events[-1]["best"]:
+                _names.append(_p.name.removesuffix(".progress.json"))
+        return _names
+
+    demo_url = mo.ui.text(value="https://en.wikipedia.org/wiki/Photosynthesis",
+                          placeholder="Paste a Wikipedia or textbook URL", full_width=True)
+    demo_takes = mo.ui.slider(1, 4, value=3, show_value=True, label="Takes per render")
+    demo_go = mo.ui.run_button(label="🎸 Make the song", kind="success")
+    demo_refresh = mo.ui.refresh(options=["2s", "5s"], default_interval="2s")
+    demo_past = mo.ui.dropdown(options=_finished_runs(), label="…or replay a finished run",
+                               on_change=lambda name: (set_demo_run(name), set_demo_done(name)))
+
+    mo.vstack([
+        mo.md("# 🎧 Listen to what you read\n"
+              "Paste a page. An agent pulls out the key facts, writes lyrics that teach them to the melody of "
+              "*Island in the Sun*, sings them, listens back with Whisper, and rewrites whatever it can't hear clearly."),
+        demo_url,
+        mo.hstack([demo_takes, demo_go, demo_past], justify="start", gap=2, align="center"),
+    ])
+    return (
+        DEMO_CODE,
+        DEMO_RUNS,
+        demo_go,
+        demo_refresh,
+        demo_takes,
+        demo_url,
+        get_demo_done,
+        get_demo_run,
+        set_demo_done,
+        set_demo_run,
+        singalong,
+    )
+
+
+@app.cell(hide_code=True)
+def demo_launch(
+    DEMO_CODE,
+    Path,
+    demo_go,
+    demo_takes,
+    demo_url,
+    os,
+    re,
+    set_demo_done,
+    set_demo_run,
+    shlex,
+    subprocess,
+    sys,
+    time,
+):
+    if demo_go.value:
+        if "WANDB_API_KEY" not in os.environ:
+            for _line in Path("/home/marimo/hack/.secrets.env").read_text().splitlines():
+                _k, _, _v = _line.partition("=")
+                os.environ[_k] = _v
+        _slug = re.sub(r"[^a-z0-9]+", "-", demo_url.value.rstrip("/").rsplit("/", 1)[-1].lower()).strip("-")[:30] or "page"
+        _run = f"{_slug}-{time.strftime('%H%M%S')}"
+        subprocess.Popen(
+            f"cd {DEMO_CODE} && nohup {sys.executable} run_loop.py {shlex.quote(demo_url.value)} {_run} {demo_takes.value}"
+            f" > /home/marimo/hack/logs/loop-{_run}.log 2>&1 &",
+            shell=True,
+        )
+        set_demo_done(None)
+        set_demo_run(_run)
+    return
+
+
+@app.cell(hide_code=True)
+def demo_progress(
+    DEMO_RUNS,
+    Path,
+    demo_refresh,
+    get_demo_done,
+    get_demo_run,
+    json,
+    mo,
+    set_demo_done,
+):
+    demo_refresh.value
+    _run = get_demo_run()
+    mo.stop(_run is None, mo.md("_Press **Make the song** to start, or replay a finished run._"))
+
+    _events_path = DEMO_RUNS / f"{_run}.progress.json"
+    _log = Path(f"/home/marimo/hack/logs/loop-{_run}.log")
+    _events = json.loads(_events_path.read_text()) if _events_path.exists() else []
+    _log_text = _log.read_text() if _log.exists() else ""
+    _failed = "Traceback" in _log_text
+    _done = bool(_events) and _events[-1]["step"] == "done"
+    if _done and get_demo_done() != _run:
+        set_demo_done(_run)
+
+    _facts = next((e for e in _events if e["step"] == "facts"), None)
+    _texts = [e for e in _events if e["step"] == "text"]
+    _renders = [e for e in _events if e["step"] == "render"]
+
+    if _failed:
+        _status = "❌ The loop crashed"
+    elif _done:
+        _status = "✅ Done. Press play below"
+    elif not _facts:
+        _status = "📖 Reading the page and pulling out key facts…"
+    elif not _texts or (_renders and _renders[-1]["render_pass"] == _texts[-1]["render_pass"]):
+        _status = f"✍️ Rewriting lyrics (render pass {len(_renders) + 1})…"
+    else:
+        _t = _texts[-1]
+        _status = (f"🎤 Singing render pass {_t['render_pass']} and listening back…"
+                   if _t["syllable_fit"] >= 0.95 or _t["text_pass"] >= 4 else
+                   f"✍️ Fitting lyrics to the melody: draft {_t['render_pass']}.{_t['text_pass']} "
+                   f"(syllable fit {_t['syllable_fit']:.2f}, facts {_t['fact_coverage']:.2f})")
+
+    def _bar(label, value, color):
+        _pct = round(value * 100)
+        return (f"<div style='display:grid;grid-template-columns:110px 1fr 44px;gap:8px;align-items:center;font-size:13px'>"
+                f"<span>{label}</span><div style='height:10px;border-radius:5px;background:color-mix(in srgb,currentColor 10%,transparent)'>"
+                f"<div style='width:{_pct}%;height:100%;border-radius:5px;background:{color};transition:width .4s'></div></div>"
+                f"<b>{_pct}%</b></div>")
+
+    def _render_card(e):
+        _takes = e.get("takes", [])
+        _kept = max(_takes, key=lambda t: t["take_score"]) if _takes else None
+        _chips = "".join(
+            f"<span style='padding:2px 8px;border-radius:10px;font-size:12px;"
+            f"background:{'color-mix(in srgb,#2fb36d 30%,transparent)' if t is _kept else 'color-mix(in srgb,currentColor 8%,transparent)'}'>"
+            f"take {i + 1}: {t['intelligibility']:.2f}</span>" for i, t in enumerate(_takes))
+        _weak = sum(1 for l in e["lines"] if l["score"] < 0.85)
+        return (f"<div style='padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,currentColor 15%,transparent);display:grid;gap:6px'>"
+                f"<b>Render pass {e['render_pass']}</b>"
+                + _bar("Heard clearly", e["intelligibility"], "#2fb36d")
+                + _bar("Facts taught", e["fact_coverage"], "#3aa6f5")
+                + _bar("Syllable fit", e["syllable_fit"], "#f5b82e")
+                + f"<div style='display:flex;gap:6px;flex-wrap:wrap'>{_chips}</div>"
+                + f"<span style='font-size:12px;opacity:.7'>{'all lines clear' if not _weak else f'{_weak} line(s) misheard → rewrite'}</span></div>")
+
+    _latest_lyrics = (_renders[-1] if _renders and (not _texts or _renders[-1]["t"] >= _texts[-1]["t"]) else (_texts[-1] if _texts else None))
+    mo.vstack([
+        mo.hstack([mo.md(f"### {_facts['topic'] if _facts else _run}"), demo_refresh], justify="space-between", align="center"),
+        mo.md(f"**{_status}** · {len(_texts)} lyric drafts · {len(_renders)} render passes"),
+        mo.plain_text(_log_text[-1500:]) if _failed else mo.md(""),
+        mo.accordion({"Key facts the song must teach": mo.md("\n".join(f"- {f}" for f in _facts["facts"]))}) if _facts else mo.md(""),
+        mo.Html("<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px'>"
+                + "".join(_render_card(e) for e in _renders) + "</div>") if _renders else mo.md(""),
+        mo.accordion({"Current lyrics": mo.plain_text(_latest_lyrics["lyrics"])}) if _latest_lyrics else mo.md(""),
+    ])
+    return
+
+
+@app.cell(hide_code=True)
+def demo_player(
+    DEMO_RUNS,
+    Path,
+    get_demo_done,
+    json,
+    mo,
+    singalong,
+    subprocess,
+):
+    _run = get_demo_done()
+    mo.stop(_run is None)
+    _events = json.loads((DEMO_RUNS / f"{_run}.progress.json").read_text())
+    _facts = next(e for e in _events if e["step"] == "facts")
+    _done = _events[-1]
+    _flac = Path(_done["best"]["audio"])
+    _mp3 = _flac.with_suffix(".mp3")
+    if not _mp3.exists():
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(_flac), "-b:a", "160k", str(_mp3)], check=True)
+    singalong.from_result(_done, _facts, _mp3)
+    return
 
 
 @app.cell

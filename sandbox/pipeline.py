@@ -102,7 +102,7 @@ def melody_fidelity(audio: str) -> dict:
 
 def intelligibility(audio: str, request_path: str) -> dict:
     out = Path(audio).with_name("asr.json")
-    seconds = _run([str(HACK / ".venv-asr/bin/python"), str(HACK / "asr_score.py"), audio, request_path,
+    seconds = _run([str(HACK / ".venv-asr/bin/python"), str(Path(__file__).with_name("asr_score.py")), audio, request_path,
                     "--output", str(out)])
     result = json.loads(out.read_text())
     result["asr_seconds"] = seconds
