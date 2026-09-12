@@ -27,7 +27,7 @@ rewrite weak lines ← scorers ← YuE2 render (cot="melody", transcribed melody
 | Source melody transcription | 24s, no warnings; verse phrases 7/7/7/7 notes |
 | Cover render, verse + chorus | 40s of audio in 18s |
 | Melody fidelity of cover | 97.4% pitch-sequence match against the source |
-| Intelligibility (Whisper) | next |
+| Intelligibility (Whisper large-v3) | 100% of words heard correctly on cover v1 |
 | Weave tracing | next |
 
 ## Layout
@@ -37,6 +37,7 @@ rewrite weak lines ← scorers ← YuE2 render (cot="melody", transcribed melody
 | `notebook.py` | molab notebook (edited live through `marimo pair`) |
 | `sandbox/setup.sh` | one-time install on the molab sandbox |
 | `sandbox/transcribe.sh` | SheetSage2 transcription of the source track |
+| `sandbox/asr_score.py` | intelligibility scorer: Whisper transcript vs intended lyrics, per line |
 | `requests/` | YuE2 song requests (style + lyrics) |
 
 Audio files and transcribed scores of the source track are gitignored and not distributed.
@@ -47,8 +48,8 @@ Audio files and transcribed scores of the source track are gitignored and not di
 2. `cp .env.example .env` and fill in `WANDB_API_KEY` and `MARIMO_TOKEN`.
 3. Run `sandbox/setup.sh` on the sandbox (detached; about 10 minutes).
 
-molab sets `PYTHONSAFEPATH=1`, which breaks the YuE2 skill scripts' sibling imports; run
-them with `env -u PYTHONSAFEPATH`.
+molab sets `PYTHONSAFEPATH=1` and a kernel `PYTHONPATH` that leak into subprocess venvs; run
+sandbox scripts with `env -u PYTHONPATH -u PYTHONSAFEPATH`.
 
 ## Licenses
 
