@@ -1,3 +1,10 @@
+# /// script
+# requires-python = ">=3.13"
+# dependencies = [
+#     "weave==0.53.9",
+# ]
+# ///
+
 import marimo
 
 __generated_with = "0.24.0"
@@ -50,6 +57,36 @@ def cover_test_v1(Path, json, mo, subprocess):
         ], widths="equal"),
         mo.md(f"**Style:** {_req['style']}"),
         mo.plain_text(_req["lyrics"]),
+    ])
+    return
+
+
+@app.cell
+def control_test(Path, json, mo, subprocess):
+    _hack = Path("/home/marimo/hack")
+    _control = json.loads((_hack / "runs/control_results.json").read_text())
+    _v1_asr = json.loads((_hack / "runs/cover-v1/asr.json").read_text())
+    _rows = [
+        {"variant": "v1 (fitted)", "syllable_fit": 1.0, "melody_fidelity": 0.974, "intelligibility": _v1_asr["intelligibility"]},
+    ] + [
+        {"variant": _name, "syllable_fit": _r["syllable_fit"], "melody_fidelity": _r["melody_fidelity"], "intelligibility": _r["intelligibility"]}
+        for _name, _r in _control.items()
+    ]
+
+    def _mp3(flac):
+        _out = Path(flac).with_suffix(".mp3")
+        if not _out.exists():
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(flac), "-b:a", "192k", str(_out)], check=True)
+        return _out.read_bytes()
+
+    mo.vstack([
+        mo.md("## Control test: do the scorers catch badly fitted lyrics?"),
+        mo.ui.table(_rows, selection=None),
+        mo.hstack([
+            mo.vstack([mo.md("**v1 (fitted)**"), mo.audio(src=_mp3(_hack / "runs/cover-v1/audio.flac"))]),
+            mo.vstack([mo.md("**medium (9-10 syllables/line)**"), mo.audio(src=_mp3(_hack / "runs/control-medium/audio.flac"))]),
+            mo.vstack([mo.md("**bad (17-27 syllables/line)**"), mo.audio(src=_mp3(_hack / "runs/control-bad/audio.flac"))]),
+        ], widths="equal"),
     ])
     return
 

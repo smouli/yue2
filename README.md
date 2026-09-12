@@ -28,6 +28,7 @@ rewrite weak lines ← scorers ← YuE2 render (cot="melody", transcribed melody
 | Cover render, verse + chorus | 40s of audio in 18s |
 | Melody fidelity of cover | 97.4% pitch-sequence match against the source |
 | Intelligibility (Whisper large-v3) | 100% of words heard correctly on cover v1 |
+| Control test: medium / bad lyrics | intelligibility 1.00 → 0.28 → 0.00; syllable fit 1.00 → 0.79 → 0.39; melody fidelity 0.97 → 0.99 → 0.96 (guardrail only) |
 | Weave tracing | next |
 
 ## Layout
