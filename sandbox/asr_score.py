@@ -55,12 +55,23 @@ def score_lines(lines: list[str], heard: str) -> list[dict]:
     results = []
     for i, line in enumerate(lines):
         n = len(normalize(line))
+        heard_line = " ".join(heard_by_line[i])
         results.append({
             "line": line,
-            "heard": " ".join(heard_by_line[i]),
+            "heard": heard_line,
             "wer": round(min(1.0, errors[i] / max(n, 1)), 3),
+            # Letter-level similarity forgives word-boundary slips like "up on" vs "upon".
+            "score": round(letter_similarity(line, heard_line), 3),
         })
     return results
+
+
+def letter_similarity(reference: str, heard: str) -> float:
+    ref, hyp = "".join(normalize(reference)), "".join(normalize(heard))
+    if not ref:
+        return 1.0
+    matched = sum(block.size for block in difflib.SequenceMatcher(None, ref, hyp, autojunk=False).get_matching_blocks())
+    return matched / max(len(ref), len(hyp))
 
 
 def main():
@@ -80,13 +91,13 @@ def main():
     heard = asr(args.audio, return_timestamps=True, generate_kwargs={"language": "english"})["text"].strip()
 
     per_line = score_lines(lines, heard)
-    total_words = sum(len(normalize(line)) for line in lines)
-    overall = sum(r["wer"] * len(normalize(r["line"])) for r in per_line) / max(total_words, 1)
+    weights = [len("".join(normalize(r["line"]))) for r in per_line]
+    total = max(sum(weights), 1)
     result = {
         "model": MODEL,
         "heard": heard,
-        "wer": round(overall, 3),
-        "intelligibility": round(1 - overall, 3),
+        "wer": round(sum(r["wer"] * w for r, w in zip(per_line, weights)) / total, 3),
+        "intelligibility": round(sum(r["score"] * w for r, w in zip(per_line, weights)) / total, 3),
         "lines": per_line,
     }
     Path(args.output).write_text(json.dumps(result, indent=2))

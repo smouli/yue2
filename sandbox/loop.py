@@ -1,0 +1,204 @@
+"""The autonomous loop: source text → facts → lyrics → render → score → rewrite.
+
+Two speeds:
+  * text passes (seconds): rewrite lyrics until syllables fit the melody and the facts survive
+  * render passes (~1.5 min): sing it, listen with Whisper, feed misheard lines back to the writer
+
+Every step is a Weave op, so each run shows up as one trace tree in the yue2 Weave project.
+"""
+
+import json
+import os
+import re
+import time
+from pathlib import Path
+
+import openai
+import trafilatura
+import weave
+
+import pipeline
+
+WRITER = "deepseek-ai/DeepSeek-V4-Pro"
+QUIZ_TAKER = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+WEAVE_PROJECT = "sanatmouli-scoredata/yue2"
+STYLE = (
+    "English, sunny laid-back 90s power pop, relaxed male vocal, strummed acoustic guitar, "
+    "clean electric guitar, bass, light drums, clear diction, 115 BPM"
+)
+SECTIONS = [("Verse", 4), ("Chorus", 3)]  # line counts matching pipeline.PHRASE_BUDGET
+
+_client = None
+
+
+def client() -> openai.OpenAI:
+    global _client
+    if _client is None:
+        _client = openai.OpenAI(
+            base_url="https://api.inference.wandb.ai/v1",
+            api_key=os.environ["WANDB_API_KEY"],
+            project=WEAVE_PROJECT,
+            default_headers={"User-Agent": "yue2-hack/0.1"},
+        )
+    return _client
+
+
+def _chat_json(model: str, system: str, user: str, max_tokens: int = 2000) -> dict:
+    response = client().chat.completions.create(
+        model=model, max_tokens=max_tokens, temperature=0.7,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+    )
+    text = response.choices[0].message.content or ""
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        raise ValueError(f"{model} returned no JSON: {text[:300]}")
+    return json.loads(match.group(0))
+
+
+@weave.op
+def fetch_source(url: str) -> str:
+    downloaded = trafilatura.fetch_url(url)
+    text = trafilatura.extract(downloaded, include_comments=False, include_tables=False) or ""
+    return text[:12000]
+
+
+@weave.op
+def extract_facts(source: str, n_facts: int = 6) -> dict:
+    return _chat_json(WRITER,
+        "You turn study material into the most important, concrete facts a learner should remember.",
+        f"""Source text:
+---
+{source}
+---
+Return JSON: {{"topic": str, "facts": [{n_facts} short factual statements],
+"quiz": [one question per fact, each {{"question": str, "answer": str}} answerable from that fact alone]}}""")
+
+
+def _lyrics_text(lines: list[str]) -> str:
+    out, i = [], 0
+    for name, count in SECTIONS:
+        out.append(f"[{name}]")
+        out += lines[i:i + count]
+        out.append("")
+        i += count
+    return "\n".join(out).strip()
+
+
+@weave.op
+def write_lyrics(facts: dict, feedback: str | None = None, previous: str | None = None,
+                 playbook: list[str] | None = None) -> str:
+    budget = pipeline.PHRASE_BUDGET
+    spec = "\n".join(f"line {i + 1}: exactly {n} syllables" for i, n in enumerate(budget))
+    user = f"""Topic: {facts['topic']}
+Facts to teach:
+{json.dumps(facts['facts'], indent=1)}
+
+Write song lyrics that teach these facts, set to an existing melody. The melody has {len(budget)} phrases,
+one lyric line per phrase: lines 1-4 are the verse, lines 5-7 the chorus.
+Syllable budget per line (one syllable per note, this is strict):
+{spec}
+Rules: plain singable English, one fact per line where possible, no filler like "oh yeah",
+prefer short common words, avoid tongue-twisters, keep technical terms but place them where they fit.
+"""
+    if playbook:
+        user += "\nLessons from earlier songs:\n" + "\n".join(f"- {tip}" for tip in playbook)
+    if previous:
+        user += f"\nPrevious attempt:\n{previous}\n\nWhat went wrong and must be fixed:\n{feedback}\n" \
+                "Keep lines that had no problems unchanged."
+    user += '\nReturn JSON: {"lines": [7 strings]}'
+    lines = _chat_json(WRITER, "You are a songwriter who writes precise, singable educational lyrics.", user)["lines"]
+    return _lyrics_text([str(line).strip() for line in lines])
+
+
+@weave.op
+def fact_coverage(lyrics: str, facts: dict) -> dict:
+    """A separate model answers the quiz from the lyrics alone; the writer model grades the answers."""
+    quiz = facts["quiz"]
+    answers = _chat_json(QUIZ_TAKER,
+        "Answer only from the song lyrics you are given. If the lyrics do not say, answer \"unknown\".",
+        f"Lyrics:\n{lyrics}\n\nQuestions:\n" + "\n".join(f"{i + 1}. {q['question']}" for i, q in enumerate(quiz))
+        + '\nReturn JSON: {"answers": [one string per question]}')["answers"]
+    grades = _chat_json(WRITER, "You grade quiz answers strictly but accept paraphrases.",
+        json.dumps([{"question": q["question"], "key": q["answer"], "given": a} for q, a in zip(quiz, answers)])
+        + '\nReturn JSON: {"correct": [true/false per item]}')["correct"]
+    items = [{"question": q["question"], "key": q["answer"], "given": a, "correct": bool(c)}
+             for q, a, c in zip(quiz, answers, grades)]
+    return {"fact_coverage": round(sum(i["correct"] for i in items) / max(len(quiz), 1), 3), "items": items}
+
+
+def _text_feedback(fit: dict, coverage: dict) -> str:
+    notes = [f"line {i + 1} \"{l['line']}\" has {l['syllables']} syllables, needs exactly {l['notes']}"
+             for i, l in enumerate(fit["syllable_lines"]) if l["syllables"] != l["notes"]]
+    if not fit["line_count_ok"]:
+        notes.append(f"write exactly {len(pipeline.PHRASE_BUDGET)} lines")
+    notes += [f"a listener could not answer \"{i['question']}\" (answer: {i['key']})"
+              for i in coverage["items"] if not i["correct"]]
+    return "\n".join(notes)
+
+
+def _listen_feedback(asr: dict, threshold: float = 0.85) -> str:
+    return "\n".join(
+        f"line \"{l['line']}\" was heard as \"{l['heard'] or '(nothing)'}\"; reword it with simpler, "
+        "clearer words and the same syllable count"
+        for l in asr["lines"] if l["score"] < threshold)
+
+
+@weave.op
+def text_pass(facts: dict, feedback: str | None, previous: str | None, playbook: list[str] | None) -> dict:
+    lyrics = write_lyrics(facts, feedback, previous, playbook)
+    fit = pipeline.syllable_fit(lyrics)
+    coverage = fact_coverage(lyrics, facts)
+    return {"lyrics": lyrics, **fit, **coverage}
+
+
+@weave.op
+def render_pass(lyrics: str, out_dir: str) -> dict:
+    request = {"id": Path(out_dir).name, "style": STYLE, "lyrics": lyrics, "cot": "melody", "seed": 831001}
+    rendered = pipeline.render(request, Path(out_dir))
+    melody = pipeline.melody_fidelity(rendered["audio"])
+    asr = pipeline.intelligibility(rendered["audio"], rendered["request"])
+    return {**rendered, **melody, "intelligibility": asr["intelligibility"], "heard": asr["heard"], "lines": asr["lines"]}
+
+
+@weave.op
+def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passes: int = 3,
+             fit_target: float = 0.95, coverage_target: float = 0.67, intelligibility_target: float = 0.9,
+             playbook: list[str] | None = None, progress_path: str | None = None) -> dict:
+    history = []
+
+    def log(event: dict):
+        history.append({"t": round(time.time(), 1), **event})
+        if progress_path:
+            Path(progress_path).write_text(json.dumps(history, indent=2))
+
+    source = fetch_source(url)
+    facts = extract_facts(source)
+    log({"step": "facts", "topic": facts["topic"], "facts": facts["facts"]})
+
+    lyrics, feedback, best = None, None, None
+    for r in range(max_render_passes):
+        for t in range(max_text_passes):
+            result = text_pass(facts, feedback, lyrics, playbook)
+            lyrics = result["lyrics"]
+            log({"step": "text", "render_pass": r + 1, "text_pass": t + 1, "lyrics": lyrics,
+                 "syllable_fit": result["syllable_fit"], "fact_coverage": result["fact_coverage"]})
+            if result["syllable_fit"] >= fit_target and result["fact_coverage"] >= coverage_target:
+                break
+            feedback = _text_feedback(result, result)
+
+        heard = render_pass(lyrics, str(pipeline.HACK / f"runs/{run_name}/render-{r + 1}"))
+        log({"step": "render", "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
+             "intelligibility": heard["intelligibility"], "melody_fidelity": heard["melody_fidelity"],
+             "syllable_fit": result["syllable_fit"], "fact_coverage": result["fact_coverage"],
+             "lines": heard["lines"]})
+        score = heard["intelligibility"] * result["fact_coverage"]
+        if best is None or score > best["score"]:
+            best = {"score": round(score, 3), "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
+                    "intelligibility": heard["intelligibility"], "fact_coverage": result["fact_coverage"],
+                    "syllable_fit": result["syllable_fit"]}
+        if heard["intelligibility"] >= intelligibility_target:
+            break
+        feedback = _listen_feedback(heard)
+
+    log({"step": "done", "best": best})
+    return {"topic": facts["topic"], "best": best, "history": history}

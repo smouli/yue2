@@ -38,9 +38,18 @@ def lyric_lines(lyrics: str) -> list[str]:
 
 
 def count_syllables(word: str) -> int:
-    word = re.sub(r"[^a-z]", "", word.lower())
+    """CMU dictionary count when `pronouncing` is installed, vowel-group heuristic otherwise."""
+    word = re.sub(r"[^a-z']", "", word.lower()).strip("'")
     if not word:
         return 0
+    try:
+        import pronouncing
+        phones = pronouncing.phones_for_word(word)
+        if phones:
+            return pronouncing.syllable_count(phones[0])
+    except ImportError:
+        pass
+    word = word.replace("'", "")
     groups = re.findall(r"[aeiouy]+", word)
     n = len(groups)
     if word.endswith("e") and not word.endswith(("le", "ee")) and n > 1:
@@ -57,7 +66,7 @@ def syllable_fit(lyrics: str, budget: list[int] = PHRASE_BUDGET) -> dict:
         per_line.append({"line": line, "syllables": syllables, "notes": notes,
                          "fit": round(min(syllables, notes) / max(syllables, notes), 3)})
     score = sum(p["fit"] for p in per_line) / len(budget) if len(lines) == len(budget) else 0.0
-    return {"syllable_fit": round(score, 3), "line_count_ok": len(lines) == len(budget), "lines": per_line}
+    return {"syllable_fit": round(score, 3), "line_count_ok": len(lines) == len(budget), "syllable_lines": per_line}
 
 
 def render(request: dict, out_dir: Path, abc_file: Path = SOURCE_ABC) -> dict:
