@@ -20,8 +20,11 @@ from weave.trace.util import ContextAwareThreadPoolExecutor
 
 import pipeline
 
-WRITER = os.environ.get("YUE2_WRITER", "deepseek-ai/DeepSeek-V4-Pro")
+# Gemma 4 31B won the lyric-writer bake-off (best syllable fit and facts taught, ~1.3s per draft).
+WRITER = os.environ.get("YUE2_WRITER", "google/gemma-4-31B-it")
+ANALYST = "deepseek-ai/DeepSeek-V4-Pro"  # extracts facts, grades quiz answers, quotes source sentences
 QUIZ_TAKER = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+JUDGE = "Qwen/Qwen3-235B-A22B-Instruct-2507"  # naturalness
 # Reasoning models spend completion tokens thinking before they answer; give them room.
 REASONING_MODELS = {"openai/gpt-oss-120b", "openai/gpt-oss-20b", "zai-org/GLM-5.2", "zai-org/GLM-5.3-Flash",
                     "moonshotai/Kimi-K2.6", "moonshotai/Kimi-K2.7-Code", "MiniMaxAI/MiniMax-M3",
@@ -74,7 +77,7 @@ def fetch_source(url: str) -> str:
 
 @weave.op
 def extract_facts(source: str, n_facts: int = 6) -> dict:
-    return _chat_json(WRITER,
+    return _chat_json(ANALYST,
         "You turn study material into the most important, concrete facts a learner should remember.",
         f"""Source text:
 ---
@@ -137,7 +140,7 @@ def fact_coverage(lyrics: str, facts: dict) -> dict:
         "Answer only from the song lyrics you are given. If the lyrics do not say, answer \"unknown\".",
         f"Lyrics:\n{lyrics}\n\nQuestions:\n" + "\n".join(f"{i + 1}. {q['question']}" for i, q in enumerate(quiz))
         + '\nReturn JSON: {"answers": [one string per question]}', temperature=0)["answers"]
-    grades = _chat_json(WRITER, "You grade quiz answers strictly but accept paraphrases.",
+    grades = _chat_json(ANALYST, "You grade quiz answers strictly but accept paraphrases.",
         json.dumps([{"question": q["question"], "key": q["answer"], "given": a} for q, a in zip(quiz, answers)])
         + '\nReturn JSON: {"correct": [true/false per item]}', temperature=0)["correct"]
     items = [{"question": q["question"], "key": q["answer"], "given": a, "correct": bool(c)}
@@ -149,7 +152,7 @@ def fact_coverage(lyrics: str, facts: dict) -> dict:
 def align_to_source(lyrics: str, source: str) -> list[dict]:
     """For each lyric line, quote the source sentence it teaches, so a reader can follow along."""
     lines = pipeline.lyric_lines(lyrics)
-    quotes = _chat_json(WRITER,
+    quotes = _chat_json(ANALYST,
         "You match song lyrics to the exact sentences of a source text they were based on.",
         f"""Source text:
 ---
@@ -164,6 +167,22 @@ Return JSON: {{"sentences": [one string per lyric line]}}""", max_tokens=3000, t
             for line, quote in zip(lines, quotes)]
 
 
+@weave.op
+def naturalness(lyrics: str) -> dict:
+    """Fixed judge: does this read like real, singable English rather than compressed shorthand?"""
+    lines = pipeline.lyric_lines(lyrics)
+    verdict = _chat_json(JUDGE,
+        "You judge song lyrics for natural, singable English. Penalize abbreviations (like 'chem'), dropped "
+        "articles or verbs, telegraphic shorthand, and awkward word order. Do not judge factual accuracy.",
+        "Lyrics (numbered):\n" + "\n".join(f"{i + 1}. {line}" for i, line in enumerate(lines))
+        + '\nReturn JSON: {"score": integer 1-5 for the whole song, '
+          '"awkward_lines": [{"line": line number, "why": short reason}]}',
+        temperature=0)
+    awkward = [{"line": int(a["line"]), "text": lines[int(a["line"]) - 1], "why": str(a.get("why", ""))}
+               for a in verdict.get("awkward_lines", []) if 1 <= int(a.get("line", 0)) <= len(lines)]
+    return {"natural": round((int(verdict["score"]) - 1) / 4, 3), "awkward_lines": awkward}
+
+
 def _text_feedback(fit: dict, coverage: dict) -> str:
     notes = [f"line {i + 1} \"{l['line']}\" has {l['syllables']} syllables, needs exactly {l['notes']}"
              for i, l in enumerate(fit["syllable_lines"]) if l["syllables"] != l["notes"]]
@@ -171,6 +190,8 @@ def _text_feedback(fit: dict, coverage: dict) -> str:
         notes.append(f"write exactly {len(pipeline.PHRASE_BUDGET)} lines")
     notes += [f"a listener could not answer \"{i['question']}\" (answer: {i['key']})"
               for i in coverage["items"] if not i["correct"]]
+    notes += [f"line {a['line']} \"{a['text']}\" reads unnaturally ({a['why']}); use full, natural phrasing"
+              for a in coverage.get("awkward_lines", [])]
     taught = [i["key"] for i in coverage["items"] if i["correct"]]
     if taught and notes:
         notes.append("already taught correctly, do not lose these: " + "; ".join(taught))
@@ -190,7 +211,13 @@ def text_pass(facts: dict, feedback: str | None, previous: str | None, playbook:
     lyrics = write_lyrics(facts, feedback, previous, playbook, locked)
     fit = pipeline.syllable_fit(lyrics)
     coverage = fact_coverage(lyrics, facts)
-    return {"lyrics": lyrics, **fit, **coverage}
+    natural = naturalness(lyrics)
+    return {"lyrics": lyrics, **fit, **coverage, **natural}
+
+
+def _draft_score(result: dict) -> float:
+    # Naturalness scales the score between 0.5x and 1x so it matters without zeroing out a good fit.
+    return result["syllable_fit"] * result["fact_coverage"] * (0.5 + 0.5 * result["natural"])
 
 
 BASE_SEED = 831001
@@ -233,9 +260,10 @@ def render_pass(lyrics: str, out_dir: str, takes: int = 1) -> dict:
 @weave.op
 def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passes: int = 3,
              fit_target: float = 0.95, coverage_target: float = 0.67, intelligibility_target: float = 0.9,
-             line_target: float = 0.85, takes: int = 1,
+             line_target: float = 0.85, natural_target: float = 0.5, takes: int = 1,
              playbook: list[str] | None = None, progress_path: str | None = None) -> dict:
     history = []
+    started = time.time()
 
     def log(event: dict):
         history.append({"t": round(time.time(), 1), **event})
@@ -244,7 +272,8 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
 
     source = fetch_source(url)
     facts = extract_facts(source)
-    log({"step": "facts", "topic": facts["topic"], "facts": facts["facts"], "url": url, "source": source})
+    log({"step": "facts", "topic": facts["topic"], "facts": facts["facts"], "url": url, "source": source,
+         "writer": WRITER, "playbook": playbook or []})
 
     lyrics, feedback, best, listen_notes, locked = None, None, None, "", {}
     for r in range(max_render_passes):
@@ -253,11 +282,14 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
             result = text_pass(facts, feedback, lyrics, playbook, locked)
             lyrics = result["lyrics"]
             log({"step": "text", "render_pass": r + 1, "text_pass": t + 1, "lyrics": lyrics,
-                 "locked_lines": sorted(i + 1 for i in locked),
-                 "syllable_fit": result["syllable_fit"], "fact_coverage": result["fact_coverage"]})
-            if draft is None or result["syllable_fit"] * result["fact_coverage"] > draft["syllable_fit"] * draft["fact_coverage"]:
+                 "locked_lines": sorted(i + 1 for i in locked), "feedback": feedback,
+                 "syllable_fit": result["syllable_fit"], "fact_coverage": result["fact_coverage"],
+                 "natural": result["natural"], "awkward_lines": result["awkward_lines"],
+                 "syllable_lines": result["syllable_lines"]})
+            if draft is None or _draft_score(result) > _draft_score(draft):
                 draft = result
-            if result["syllable_fit"] >= fit_target and result["fact_coverage"] >= coverage_target:
+            if (result["syllable_fit"] >= fit_target and result["fact_coverage"] >= coverage_target
+                    and result["natural"] >= natural_target):
                 break
             # Keep the listener's complaints in view while fixing syllables and facts.
             feedback = "\n".join(filter(None, [_text_feedback(result, result), listen_notes]))
@@ -267,12 +299,12 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
         log({"step": "render", "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
              "intelligibility": heard["intelligibility"], "melody_fidelity": heard["melody_fidelity"],
              "syllable_fit": result["syllable_fit"], "fact_coverage": result["fact_coverage"],
-             "lines": heard["lines"], "takes": heard["takes"]})
+             "natural": result["natural"], "lines": heard["lines"], "takes": heard["takes"]})
         score = heard["intelligibility"] * result["fact_coverage"]
         if best is None or score > best["score"]:
             best = {"score": round(score, 3), "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
                     "intelligibility": heard["intelligibility"], "fact_coverage": result["fact_coverage"],
-                    "syllable_fit": result["syllable_fit"], "lines": heard["lines"]}
+                    "syllable_fit": result["syllable_fit"], "natural": result["natural"], "lines": heard["lines"]}
         worst_line = min(l["score"] for l in heard["lines"])
         if heard["intelligibility"] >= intelligibility_target and worst_line >= line_target:
             break
@@ -281,5 +313,5 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
         locked = {i: l["line"] for i, l in enumerate(heard["lines"]) if l["score"] >= line_target}
 
     best["alignment"] = align_to_source(best["lyrics"], source)
-    log({"step": "done", "best": best})
+    log({"step": "done", "best": best, "seconds": round(time.time() - started, 1)})
     return {"topic": facts["topic"], "best": best, "history": history}

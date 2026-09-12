@@ -34,7 +34,6 @@ CANDIDATES = [
     "moonshotai/Kimi-K2.6",
     "google/gemma-4-31B-it",
 ]
-JUDGE = "Qwen/Qwen3-235B-A22B-Instruct-2507"
 DATASET_PATH = pipeline.HACK / "runs/bakeoff-dataset.json"
 
 
@@ -68,15 +67,9 @@ def facts_taught(output: dict, topic: str, facts: list[str], quiz: list[dict]) -
 
 @weave.op
 def naturalness(output: dict) -> dict:
-    """Fixed judge: does this read like real, singable English rather than compressed shorthand?"""
     if not output["lyrics"]:
         return {"natural": 0.0}
-    verdict = loop._chat_json(JUDGE,
-        "You judge song lyrics for natural, singable English. Penalize abbreviations (like 'chem'), dropped "
-        "articles or verbs, telegraphic shorthand, and awkward word order. Do not judge factual accuracy.",
-        f"Lyrics:\n{output['lyrics']}\n\nReturn JSON: {{\"score\": integer 1-5, \"worst_line\": str}}",
-        temperature=0)
-    return {"natural": round((int(verdict["score"]) - 1) / 4, 3), "worst_line": verdict.get("worst_line", "")}
+    return {"natural": loop.naturalness(output["lyrics"])["natural"]}
 
 
 @weave.op
