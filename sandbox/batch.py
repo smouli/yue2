@@ -57,7 +57,13 @@ def main():
         run_name = f"{prefix}-{slug}"
         used = [] if mode == "baseline" else pb.rules(book)
         progress = pipeline.HACK / f"runs/{run_name}.progress.json"
-        result = loop.run_loop(url, run_name, takes=takes, playbook=used, progress_path=str(progress))
+        try:
+            result = loop.run_loop(url, run_name, takes=takes, playbook=used, progress_path=str(progress))
+        except Exception as error:  # one bad page should not sink the batch
+            rows.append({"url": url, "run": run_name, "error": f"{type(error).__name__}: {error}"[:500]})
+            summary_path.write_text(json.dumps(rows, indent=2))
+            print("failed", run_name, error, flush=True)
+            continue
         row = {"url": url, "run": run_name, "playbook_version": 0 if mode == "baseline" else book["version"],
                "rules_used": len(used), **metrics(result["history"])}
         if mode == "learn":

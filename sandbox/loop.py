@@ -57,15 +57,21 @@ def _chat_json(model: str, system: str, user: str, max_tokens: int = 2000, tempe
         max_tokens = max(max_tokens, 16000)
         if model.startswith("openai/gpt-oss"):
             extra["reasoning_effort"] = "low"
-    response = client().chat.completions.create(
-        model=model, max_tokens=max_tokens, temperature=temperature,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], **extra,
-    )
-    text = response.choices[0].message.content or ""
-    match = re.search(r"\{.*\}", text, re.S)
-    if not match:
-        raise ValueError(f"{model} returned no JSON: {text[:300]}")
-    return json.loads(match.group(0))
+    problem = ""
+    for _attempt in range(3):  # models occasionally truncate or wrap their JSON; retry before failing the run
+        response = client().chat.completions.create(
+            model=model, max_tokens=max_tokens, temperature=temperature,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], **extra,
+        )
+        text = response.choices[0].message.content or ""
+        match = re.search(r"\{.*\}", text, re.S)
+        try:
+            if match:
+                return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+        problem = f"finish_reason={response.choices[0].finish_reason}: {text[:300]}"
+    raise ValueError(f"{model} returned no valid JSON ({problem})")
 
 
 @weave.op
@@ -132,19 +138,39 @@ Write normal whole words. Never split a word into syllables with spaces or hyphe
     return _lyrics_text(lines)
 
 
+def _is_unknown(answer) -> bool:
+    text = str(answer or "").strip().lower().strip(".!\"'")
+    return text in ("", "unknown", "not stated", "n/a", "none") or text.startswith("unknown")
+
+
+def _as_bool(value) -> bool:
+    """Graders sometimes return "false" strings or {"correct": false} objects; bool() would call those True."""
+    if isinstance(value, dict):
+        value = value.get("correct", value.get("value", False))
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "correct", "1")
+    return value is True or value == 1
+
+
 @weave.op
 def fact_coverage(lyrics: str, facts: dict) -> dict:
-    """A separate model answers the quiz from the lyrics alone; the writer model grades the answers."""
+    """A separate model answers the quiz from the lyrics alone; the analyst model grades the answers."""
     quiz = facts["quiz"]
     answers = _chat_json(QUIZ_TAKER,
-        "Answer only from the song lyrics you are given. If the lyrics do not say, answer \"unknown\".",
+        "You know nothing except the song lyrics you are given. Answer each question using only what the lyrics "
+        "state. Do not use outside knowledge. If the lyrics do not state the answer, answer \"unknown\". "
+        "Keep each answer under 10 words.",
         f"Lyrics:\n{lyrics}\n\nQuestions:\n" + "\n".join(f"{i + 1}. {q['question']}" for i, q in enumerate(quiz))
-        + '\nReturn JSON: {"answers": [one string per question]}', temperature=0)["answers"]
-    grades = _chat_json(ANALYST, "You grade quiz answers strictly but accept paraphrases.",
-        json.dumps([{"question": q["question"], "key": q["answer"], "given": a} for q, a in zip(quiz, answers)])
-        + '\nReturn JSON: {"correct": [true/false per item]}', temperature=0)["correct"]
-    items = [{"question": q["question"], "key": q["answer"], "given": a, "correct": bool(c)}
-             for q, a, c in zip(quiz, answers, grades)]
+        + '\nReturn JSON: {"answers": [one short string per question]}', temperature=0)["answers"]
+    answered = [i for i, a in enumerate(answers) if not _is_unknown(a)]
+    grades = {}
+    if answered:  # "unknown" or blank answers are wrong by rule; only real answers go to the grader
+        raw = _chat_json(ANALYST, "You grade quiz answers strictly but accept paraphrases.",
+            json.dumps([{"question": quiz[i]["question"], "key": quiz[i]["answer"], "given": answers[i]} for i in answered])
+            + '\nReturn JSON: {"correct": [true or false for each item, in order]}', temperature=0)["correct"]
+        grades = {i: _as_bool(g) for i, g in zip(answered, raw)}
+    items = [{"question": q["question"], "key": q["answer"], "given": a, "correct": grades.get(i, False)}
+             for i, (q, a) in enumerate(zip(quiz, answers))]
     return {"fact_coverage": round(sum(i["correct"] for i in items) / max(len(quiz), 1), 3), "items": items}
 
 
