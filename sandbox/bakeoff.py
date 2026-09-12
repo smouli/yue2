@@ -1,7 +1,7 @@
 """Weave Evaluation: which open-weight model on W&B Inference writes the best lyrics for the loop?
 
 Every candidate writes a first draft for the same topics; fixed scorers judge the drafts.
-    python bakeoff.py            # writes runs/bakeoff.json and a comparable evaluation per model in Weave
+    python bakeoff.py [model ...]   # updates runs/bakeoff.json; one comparable evaluation per model in Weave
 """
 
 import asyncio
@@ -99,14 +99,15 @@ def main():
     weave.init(loop.WEAVE_PROJECT)
     rows = build_dataset()
     dataset = weave.Dataset(name="yue2-lyric-topics", rows=rows)
-    summaries = {}
-    for name in CANDIDATES:
+    out = pipeline.HACK / "runs/bakeoff.json"
+    summaries = json.loads(out.read_text()) if out.exists() else {}
+    for name in sys.argv[1:] or CANDIDATES:
         evaluation = weave.Evaluation(
             name="lyric-writer-bakeoff", dataset=dataset,
             scorers=[syllable_fit, facts_taught, naturalness, speed], trials=2,
         )
         summaries[name] = asyncio.run(evaluation.evaluate(LyricWriter(model_name=name)))
-        (pipeline.HACK / "runs/bakeoff.json").write_text(json.dumps(summaries, indent=2, default=str))
+        out.write_text(json.dumps(summaries, indent=2, default=str))
         print("finished", name, flush=True)
     print("BAKEOFF_DONE")
 

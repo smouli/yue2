@@ -24,7 +24,8 @@ WRITER = os.environ.get("YUE2_WRITER", "deepseek-ai/DeepSeek-V4-Pro")
 QUIZ_TAKER = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 # Reasoning models spend completion tokens thinking before they answer; give them room.
 REASONING_MODELS = {"openai/gpt-oss-120b", "openai/gpt-oss-20b", "zai-org/GLM-5.2", "zai-org/GLM-5.3-Flash",
-                    "moonshotai/Kimi-K2.6", "moonshotai/Kimi-K2.7-Code"}
+                    "moonshotai/Kimi-K2.6", "moonshotai/Kimi-K2.7-Code", "MiniMaxAI/MiniMax-M3",
+                    "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"}
 WEAVE_PROJECT = "sanatmouli-scoredata/yue2"
 STYLE = (
     "English, sunny laid-back 90s power pop, relaxed male vocal, strummed acoustic guitar, "
@@ -50,7 +51,7 @@ def client() -> openai.OpenAI:
 def _chat_json(model: str, system: str, user: str, max_tokens: int = 2000, temperature: float = 0.7) -> dict:
     extra = {}
     if model in REASONING_MODELS:
-        max_tokens = max(max_tokens, 8000)
+        max_tokens = max(max_tokens, 16000)
         if model.startswith("openai/gpt-oss"):
             extra["reasoning_effort"] = "low"
     response = client().chat.completions.create(
