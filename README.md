@@ -16,7 +16,10 @@ rewrite weak lines ← scorers ← YuE2 render (cot="melody", transcribed melody
 - **YuE2-3B** renders new lyrics over a melody score.
 - **SheetSage2** transcribes the source track into a melody score, and re-transcribes each
   render to verify it still follows that melody.
-- **Weave** traces every loop pass and scorer (planned).
+- **W&B Inference** serves the LLMs: DeepSeek-V4-Pro writes and grades lyrics, Qwen3-30B takes
+  the fact quiz.
+- **W&B Weave** traces every loop run: each step is a `weave.op`, and inference calls are traced
+  with their token usage. Traces: [sanatmouli-scoredata/yue2](https://wandb.ai/sanatmouli-scoredata/yue2/weave).
 - **molab** (marimo on CoreWeave) hosts the GPU notebook and the demo UI.
 
 ## Status
@@ -30,6 +33,7 @@ rewrite weak lines ← scorers ← YuE2 render (cot="melody", transcribed melody
 | Intelligibility (Whisper large-v3) | 100% of words heard correctly on cover v1 |
 | Control test: medium / bad lyrics | intelligibility 1.00 → 0.28 → 0.00; syllable fit 1.00 → 0.79 → 0.39; melody fidelity 0.97 → 0.99 → 0.96 (guardrail only) |
 | Loop run 3 (black holes) | intelligibility 0.88 → 0.96 across render passes at 100% fact coverage; traced in Weave |
+| Loop run, photosynthesis (3 takes) | one Weave trace: 17 W&B Inference calls (~11k tokens), 5 text passes, 9 takes rendered |
 
 ## Layout
 
