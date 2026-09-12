@@ -1,6 +1,9 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
+#     "openai==3.13.0",
+#     "pronouncing==0.3.0",
+#     "trafilatura==2.2.0",
 #     "weave==0.53.9",
 # ]
 # ///
@@ -87,6 +90,44 @@ def control_test(Path, json, mo, subprocess):
             mo.vstack([mo.md("**medium (9-10 syllables/line)**"), mo.audio(src=_mp3(_hack / "runs/control-medium/audio.flac"))]),
             mo.vstack([mo.md("**bad (17-27 syllables/line)**"), mo.audio(src=_mp3(_hack / "runs/control-bad/audio.flac"))]),
         ], widths="equal"),
+    ])
+    return
+
+
+@app.cell
+def run_picker_cell(Path, mo):
+    _runs = sorted(p.name.removesuffix(".progress.json") for p in Path("/home/marimo/hack/runs").glob("*.progress.json"))
+    run_picker = mo.ui.dropdown(options=_runs, value=_runs[-1] if _runs else None, label="Loop run")
+    run_picker
+    return (run_picker,)
+
+
+@app.cell
+def loop_run_viewer(Path, json, mo, run_picker, subprocess):
+    _events = json.loads((Path("/home/marimo/hack/runs") / f"{run_picker.value}.progress.json").read_text())
+    _facts = next(e for e in _events if e["step"] == "facts")
+    _renders = [e for e in _events if e["step"] == "render"]
+    _texts = [e for e in _events if e["step"] == "text"]
+
+    def _mp3(flac):
+        _out = Path(flac).with_suffix(".mp3")
+        if not _out.exists():
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(flac), "-b:a", "192k", str(_out)], check=True)
+        return _out.read_bytes()
+
+    def _pass_card(e):
+        _lines = "\n".join(f"{'✅' if l['score'] >= 0.85 else '⚠️'} {l['score']:.2f}  {l['line']}\n        heard: {l['heard']}" for l in e["lines"])
+        return mo.vstack([
+            mo.md(f"### Render pass {e['render_pass']}\n**intelligibility {e['intelligibility']:.2f}** · facts {e['fact_coverage']:.2f} · syllable fit {e['syllable_fit']:.2f} · melody {e['melody_fidelity']:.2f}"),
+            mo.audio(src=_mp3(e["audio"])),
+            mo.plain_text(_lines),
+        ])
+
+    mo.vstack([
+        mo.md(f"## {_facts['topic']}: {len(_texts)} text passes, {len(_renders)} render passes"),
+        mo.accordion({"Facts the song must teach": mo.md("\n".join(f"- {f}" for f in _facts["facts"]))}),
+        mo.ui.table([{"pass": f"text {e['render_pass']}.{e['text_pass']}", "syllable_fit": e["syllable_fit"], "fact_coverage": e["fact_coverage"], "locked_lines": str(e.get("locked_lines", ""))} for e in _texts], selection=None, label="Text passes"),
+        mo.hstack([_pass_card(e) for e in _renders], widths="equal", wrap=True),
     ])
     return
 
