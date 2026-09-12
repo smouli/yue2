@@ -16,6 +16,7 @@ from pathlib import Path
 import openai
 import trafilatura
 import weave
+from weave.trace.util import ContextAwareThreadPoolExecutor
 
 import pipeline
 
@@ -163,19 +164,47 @@ def text_pass(facts: dict, feedback: str | None, previous: str | None, playbook:
     return {"lyrics": lyrics, **fit, **coverage}
 
 
+BASE_SEED = 831001
+
+
 @weave.op
-def render_pass(lyrics: str, out_dir: str) -> dict:
-    request = {"id": Path(out_dir).name, "style": STYLE, "lyrics": lyrics, "cot": "melody", "seed": 831001}
+def render_take(lyrics: str, out_dir: str, seed: int) -> dict:
+    """Sing the lyrics once and listen to the result."""
+    request = {"id": Path(out_dir).name, "style": STYLE, "lyrics": lyrics, "cot": "melody", "seed": seed}
     rendered = pipeline.render(request, Path(out_dir))
-    melody = pipeline.melody_fidelity(rendered["audio"])
     asr = pipeline.intelligibility(rendered["audio"], rendered["request"])
-    return {**rendered, **melody, "intelligibility": asr["intelligibility"], "heard": asr["heard"], "lines": asr["lines"]}
+    worst_line = min(l["score"] for l in asr["lines"])
+    return {**rendered, "seed": seed, "intelligibility": asr["intelligibility"], "worst_line": worst_line,
+            "take_score": round((asr["intelligibility"] + worst_line) / 2, 3),
+            "heard": asr["heard"], "lines": asr["lines"]}
+
+
+@weave.op
+def render_pass(lyrics: str, out_dir: str, takes: int = 1) -> dict:
+    """Render `takes` performances in parallel on the GPU and keep the clearest one.
+
+    YuE2 regenerates the whole performance for any lyric change, so a line that was sung clearly
+    can come out slurred next time. Extra takes spend spare GPU memory to beat that randomness.
+    With takes=1 this is the original single render at the original path and seed.
+    """
+    if takes == 1:
+        candidates = [render_take(lyrics, out_dir, BASE_SEED)]
+    else:
+        with ContextAwareThreadPoolExecutor(max_workers=takes) as pool:
+            candidates = list(pool.map(lambda k: render_take(lyrics, f"{out_dir}/take-{k + 1}", BASE_SEED + k),
+                                       range(takes)))
+    chosen = max(candidates, key=lambda c: c["take_score"])
+    melody = pipeline.melody_fidelity(chosen["audio"])  # guardrail check on the kept take only
+    summary = [{"seed": c["seed"], "intelligibility": c["intelligibility"], "worst_line": c["worst_line"],
+                "take_score": c["take_score"], "audio": c["audio"], "render_seconds": c["render_seconds"]}
+               for c in candidates]
+    return {**chosen, **melody, "takes": summary}
 
 
 @weave.op
 def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passes: int = 3,
              fit_target: float = 0.95, coverage_target: float = 0.67, intelligibility_target: float = 0.9,
-             line_target: float = 0.85,
+             line_target: float = 0.85, takes: int = 1,
              playbook: list[str] | None = None, progress_path: str | None = None) -> dict:
     history = []
 
@@ -205,11 +234,11 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
             feedback = "\n".join(filter(None, [_text_feedback(result, result), listen_notes]))
         result, lyrics = draft, draft["lyrics"]  # render the best draft, not the last one
 
-        heard = render_pass(lyrics, str(pipeline.HACK / f"runs/{run_name}/render-{r + 1}"))
+        heard = render_pass(lyrics, str(pipeline.HACK / f"runs/{run_name}/render-{r + 1}"), takes)
         log({"step": "render", "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
              "intelligibility": heard["intelligibility"], "melody_fidelity": heard["melody_fidelity"],
              "syllable_fit": result["syllable_fit"], "fact_coverage": result["fact_coverage"],
-             "lines": heard["lines"]})
+             "lines": heard["lines"], "takes": heard["takes"]})
         score = heard["intelligibility"] * result["fact_coverage"]
         if best is None or score > best["score"]:
             best = {"score": round(score, 3), "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
