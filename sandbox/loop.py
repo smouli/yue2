@@ -20,8 +20,11 @@ from weave.trace.util import ContextAwareThreadPoolExecutor
 
 import pipeline
 
-WRITER = "deepseek-ai/DeepSeek-V4-Pro"
+WRITER = os.environ.get("YUE2_WRITER", "deepseek-ai/DeepSeek-V4-Pro")
 QUIZ_TAKER = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+# Reasoning models spend completion tokens thinking before they answer; give them room.
+REASONING_MODELS = {"openai/gpt-oss-120b", "openai/gpt-oss-20b", "zai-org/GLM-5.2", "zai-org/GLM-5.3-Flash",
+                    "moonshotai/Kimi-K2.6", "moonshotai/Kimi-K2.7-Code"}
 WEAVE_PROJECT = "sanatmouli-scoredata/yue2"
 STYLE = (
     "English, sunny laid-back 90s power pop, relaxed male vocal, strummed acoustic guitar, "
@@ -45,9 +48,14 @@ def client() -> openai.OpenAI:
 
 
 def _chat_json(model: str, system: str, user: str, max_tokens: int = 2000, temperature: float = 0.7) -> dict:
+    extra = {}
+    if model in REASONING_MODELS:
+        max_tokens = max(max_tokens, 8000)
+        if model.startswith("openai/gpt-oss"):
+            extra["reasoning_effort"] = "low"
     response = client().chat.completions.create(
         model=model, max_tokens=max_tokens, temperature=temperature,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], **extra,
     )
     text = response.choices[0].message.content or ""
     match = re.search(r"\{.*\}", text, re.S)
@@ -87,7 +95,8 @@ def _lyrics_text(lines: list[str]) -> str:
 
 @weave.op
 def write_lyrics(facts: dict, feedback: str | None = None, previous: str | None = None,
-                 playbook: list[str] | None = None, locked: dict[int, str] | None = None) -> str:
+                 playbook: list[str] | None = None, locked: dict[int, str] | None = None,
+                 model: str | None = None) -> str:
     budget = pipeline.PHRASE_BUDGET
     spec = "\n".join(f"line {i + 1}: exactly {n} syllables" for i, n in enumerate(budget))
     user = f"""Topic: {facts['topic']}
@@ -111,7 +120,7 @@ Write normal whole words. Never split a word into syllables with spaces or hyphe
         user += "\nThese lines were sung clearly and are locked; return them exactly as written:\n" + \
                 "\n".join(f"line {i + 1}: {text}" for i, text in sorted(locked.items()))
     user += '\nReturn JSON: {"lines": [7 strings]}'
-    lines = _chat_json(WRITER, "You are a songwriter who writes precise, singable educational lyrics.", user)["lines"]
+    lines = _chat_json(model or WRITER, "You are a songwriter who writes precise, singable educational lyrics.", user)["lines"]
     lines = [str(line).strip() for line in lines]
     for i, text in (locked or {}).items():  # enforce locks even if the writer ignored them
         if i < len(lines):
