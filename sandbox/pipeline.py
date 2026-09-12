@@ -1,0 +1,100 @@
+"""Render + scoring steps for the loop. Stdlib only, so the notebook kernel can import it.
+
+Each model runs in its own venv as a subprocess, with molab's kernel PYTHONPATH/PYTHONSAFEPATH removed.
+"""
+
+import difflib
+import json
+import os
+import re
+import subprocess
+import time
+from pathlib import Path
+
+HACK = Path("/home/marimo/hack")
+SKILL = HACK / "YuE/skills/yue2-music"
+SOURCE_LAB = HACK / "runs/island-melody-vocal/melody_vocal.lab"
+SOURCE_SECTION = (17.9, 59.8)  # verse 1 + chorus 1 in the source recording
+SOURCE_ABC = HACK / "edits/island_v1c1.abc"
+PHRASE_BUDGET = [7, 7, 7, 7, 7, 8, 13]  # vocal notes per phrase: verse 1 (4 lines), chorus 1 (3 lines)
+
+
+def _env() -> dict:
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONSAFEPATH")}
+    env["HF_HOME"] = str(HACK / "hf-cache")
+    return env
+
+
+def _run(cmd: list[str], cwd: Path = HACK) -> float:
+    start = time.time()
+    proc = subprocess.run(cmd, cwd=cwd, env=_env(), capture_output=True, text=True)
+    if proc.returncode:
+        raise RuntimeError(f"{cmd[1]} failed:\n{proc.stderr[-2000:]}")
+    return round(time.time() - start, 1)
+
+
+def lyric_lines(lyrics: str) -> list[str]:
+    return [line.strip() for line in lyrics.splitlines() if line.strip() and not line.strip().startswith("[")]
+
+
+def count_syllables(word: str) -> int:
+    word = re.sub(r"[^a-z]", "", word.lower())
+    if not word:
+        return 0
+    groups = re.findall(r"[aeiouy]+", word)
+    n = len(groups)
+    if word.endswith("e") and not word.endswith(("le", "ee")) and n > 1:
+        n -= 1
+    return max(n, 1)
+
+
+def syllable_fit(lyrics: str, budget: list[int] = PHRASE_BUDGET) -> dict:
+    """Per-line syllables vs melody notes; 1.0 means every line fits its phrase exactly."""
+    lines = lyric_lines(lyrics)
+    per_line = []
+    for line, notes in zip(lines, budget):
+        syllables = sum(count_syllables(w) for w in line.split())
+        per_line.append({"line": line, "syllables": syllables, "notes": notes,
+                         "fit": round(min(syllables, notes) / max(syllables, notes), 3)})
+    score = sum(p["fit"] for p in per_line) / len(budget) if len(lines) == len(budget) else 0.0
+    return {"syllable_fit": round(score, 3), "line_count_ok": len(lines) == len(budget), "lines": per_line}
+
+
+def render(request: dict, out_dir: Path, abc_file: Path = SOURCE_ABC) -> dict:
+    out_dir = Path(out_dir)
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    req_path = out_dir.with_suffix(".request.json")
+    req_path.write_text(json.dumps(request, indent=2))
+    seconds = _run([str(HACK / ".venv-yue2/bin/python"), "scripts/run_yue2.py", "generate",
+                    "--request", str(req_path), "--cot", "melody", "--abc-file", str(abc_file),
+                    "--output", str(out_dir)], cwd=SKILL)
+    return {"audio": str(out_dir / "audio.flac"), "request": str(req_path), "render_seconds": seconds}
+
+
+def _notes(lab: Path, start: float = 0, end: float = 1e9) -> list[int]:
+    rows = [line.split("\t") for line in Path(lab).read_text().splitlines() if line.strip()]
+    return [int(float(r[2])) for r in rows if start <= float(r[0]) < end]
+
+
+def melody_fidelity(audio: str) -> dict:
+    """Re-transcribe the render and compare its vocal melody to the source section."""
+    out = Path(audio).parent.with_name(Path(audio).parent.name + "-transcription")
+    seconds = _run([str(HACK / ".venv-sheetsage2/bin/python"), "scripts/transcribe.py", audio,
+                    "--task", "melody-vocal", "--model", str(HACK / "models/SheetSage2"),
+                    "--output", str(out)], cwd=SKILL)
+    source, cover = _notes(SOURCE_LAB, *SOURCE_SECTION), _notes(out / "melody_vocal.lab")
+    intervals = lambda p: [b - a for a, b in zip(p, p[1:])]
+    return {
+        "melody_fidelity": round(difflib.SequenceMatcher(None, source, cover, autojunk=False).ratio(), 3),
+        "interval_fidelity": round(difflib.SequenceMatcher(None, intervals(source), intervals(cover), autojunk=False).ratio(), 3),
+        "source_notes": len(source), "render_notes": len(cover), "transcribe_seconds": seconds,
+    }
+
+
+def intelligibility(audio: str, request_path: str) -> dict:
+    out = Path(audio).with_name("asr.json")
+    seconds = _run([str(HACK / ".venv-asr/bin/python"), str(HACK / "asr_score.py"), audio, request_path,
+                    "--output", str(out)])
+    result = json.loads(out.read_text())
+    result["asr_seconds"] = seconds
+    return result
