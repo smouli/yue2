@@ -24,8 +24,12 @@ def lyric_lines(lyrics: str) -> list[str]:
     return [line.strip() for line in lyrics.splitlines() if line.strip() and not line.strip().startswith("[")]
 
 
-def score_lines(lines: list[str], heard: str) -> list[dict]:
-    """Align the heard words to the concatenated reference, then attribute errors to each line."""
+def score_lines(lines: list[str], heard: str, word_times: list[tuple[float, float]] | None = None) -> list[dict]:
+    """Align the heard words to the concatenated reference, then attribute errors to each line.
+
+    With `word_times` (one (start, end) per normalized heard word), each line also gets the time
+    span in which it was sung, so a player can highlight it.
+    """
     ref_words, owner = [], []
     for i, line in enumerate(lines):
         words = normalize(line)
@@ -35,22 +39,26 @@ def score_lines(lines: list[str], heard: str) -> list[dict]:
 
     errors = [0] * len(lines)
     heard_by_line = [[] for _ in lines]
+    hyp_index_by_line = [[] for _ in lines]
     matcher = difflib.SequenceMatcher(None, ref_words, hyp_words, autojunk=False)
     for tag, r1, r2, h1, h2 in matcher.get_opcodes():
         if tag == "equal":
             for k in range(r2 - r1):
                 heard_by_line[owner[r1 + k]].append(hyp_words[h1 + k])
+                hyp_index_by_line[owner[r1 + k]].append(h1 + k)
             continue
         if r1 == r2:  # insertion: charge it to the neighbouring reference line
             line = owner[min(r1, len(owner) - 1)]
             errors[line] += h2 - h1
             heard_by_line[line] += hyp_words[h1:h2]
+            hyp_index_by_line[line] += range(h1, h2)
             continue
         for k in range(r1, r2):
             errors[owner[k]] += 1
         extra = max(0, (h2 - h1) - (r2 - r1))
         errors[owner[r2 - 1]] += extra
         heard_by_line[owner[r1]] += hyp_words[h1:h2]
+        hyp_index_by_line[owner[r1]] += range(h1, h2)
 
     results = []
     for i, line in enumerate(lines):
@@ -62,7 +70,14 @@ def score_lines(lines: list[str], heard: str) -> list[dict]:
             "wer": round(min(1.0, errors[i] / max(n, 1)), 3),
             # Letter-level similarity forgives word-boundary slips like "up on" vs "upon".
             "score": round(letter_similarity(line, heard_line), 3),
+            "start": None,
+            "end": None,
         })
+        if word_times and hyp_index_by_line[i]:
+            spans = [word_times[k] for k in hyp_index_by_line[i] if k < len(word_times)]
+            if spans:
+                results[-1]["start"] = round(min(a for a, _ in spans), 2)
+                results[-1]["end"] = round(max(b for _, b in spans), 2)
     return results
 
 
@@ -88,9 +103,18 @@ def main():
         "automatic-speech-recognition", model=MODEL,
         torch_dtype=torch.bfloat16, device="cuda:0",
     )
-    heard = asr(args.audio, return_timestamps=True, generate_kwargs={"language": "english"})["text"].strip()
+    output = asr(args.audio, return_timestamps="word", generate_kwargs={"language": "english"})
+    heard = output["text"].strip()
+    word_times = []
+    for chunk in output.get("chunks", []):
+        start, end = chunk["timestamp"]
+        start = start or 0.0
+        end = end if end is not None else start
+        word_times += [(start, end)] * len(normalize(chunk["text"]))
+    if len(word_times) != len(normalize(heard)):
+        word_times = None  # chunk words disagree with the transcript; skip timing rather than mislabel
 
-    per_line = score_lines(lines, heard)
+    per_line = score_lines(lines, heard, word_times)
     weights = [len("".join(normalize(r["line"]))) for r in per_line]
     total = max(sum(weights), 1)
     result = {

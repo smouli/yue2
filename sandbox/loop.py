@@ -135,6 +135,25 @@ def fact_coverage(lyrics: str, facts: dict) -> dict:
     return {"fact_coverage": round(sum(i["correct"] for i in items) / max(len(quiz), 1), 3), "items": items}
 
 
+@weave.op
+def align_to_source(lyrics: str, source: str) -> list[dict]:
+    """For each lyric line, quote the source sentence it teaches, so a reader can follow along."""
+    lines = pipeline.lyric_lines(lyrics)
+    quotes = _chat_json(WRITER,
+        "You match song lyrics to the exact sentences of a source text they were based on.",
+        f"""Source text:
+---
+{source}
+---
+Lyric lines:
+{json.dumps(lines, indent=1)}
+
+For each lyric line, copy the single source sentence it best reflects, verbatim, character for character.
+Return JSON: {{"sentences": [one string per lyric line]}}""", max_tokens=3000, temperature=0)["sentences"]
+    return [{"line": line, "source_sentence": str(quote).strip(), "verbatim": str(quote).strip() in source}
+            for line, quote in zip(lines, quotes)]
+
+
 def _text_feedback(fit: dict, coverage: dict) -> str:
     notes = [f"line {i + 1} \"{l['line']}\" has {l['syllables']} syllables, needs exactly {l['notes']}"
              for i, l in enumerate(fit["syllable_lines"]) if l["syllables"] != l["notes"]]
@@ -215,7 +234,7 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
 
     source = fetch_source(url)
     facts = extract_facts(source)
-    log({"step": "facts", "topic": facts["topic"], "facts": facts["facts"]})
+    log({"step": "facts", "topic": facts["topic"], "facts": facts["facts"], "url": url, "source": source})
 
     lyrics, feedback, best, listen_notes, locked = None, None, None, "", {}
     for r in range(max_render_passes):
@@ -243,7 +262,7 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
         if best is None or score > best["score"]:
             best = {"score": round(score, 3), "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
                     "intelligibility": heard["intelligibility"], "fact_coverage": result["fact_coverage"],
-                    "syllable_fit": result["syllable_fit"]}
+                    "syllable_fit": result["syllable_fit"], "lines": heard["lines"]}
         worst_line = min(l["score"] for l in heard["lines"])
         if heard["intelligibility"] >= intelligibility_target and worst_line >= line_target:
             break
@@ -251,5 +270,6 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
         # Lock clearly sung lines so the next rewrite cannot regress them.
         locked = {i: l["line"] for i, l in enumerate(heard["lines"]) if l["score"] >= line_target}
 
+    best["alignment"] = align_to_source(best["lyrics"], source)
     log({"step": "done", "best": best})
     return {"topic": facts["topic"], "best": best, "history": history}
