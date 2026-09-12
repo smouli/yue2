@@ -43,9 +43,9 @@ def client() -> openai.OpenAI:
     return _client
 
 
-def _chat_json(model: str, system: str, user: str, max_tokens: int = 2000) -> dict:
+def _chat_json(model: str, system: str, user: str, max_tokens: int = 2000, temperature: float = 0.7) -> dict:
     response = client().chat.completions.create(
-        model=model, max_tokens=max_tokens, temperature=0.7,
+        model=model, max_tokens=max_tokens, temperature=temperature,
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
     )
     text = response.choices[0].message.content or ""
@@ -86,7 +86,7 @@ def _lyrics_text(lines: list[str]) -> str:
 
 @weave.op
 def write_lyrics(facts: dict, feedback: str | None = None, previous: str | None = None,
-                 playbook: list[str] | None = None) -> str:
+                 playbook: list[str] | None = None, locked: dict[int, str] | None = None) -> str:
     budget = pipeline.PHRASE_BUDGET
     spec = "\n".join(f"line {i + 1}: exactly {n} syllables" for i, n in enumerate(budget))
     user = f"""Topic: {facts['topic']}
@@ -99,15 +99,23 @@ Syllable budget per line (one syllable per note, this is strict):
 {spec}
 Rules: plain singable English, one fact per line where possible, no filler like "oh yeah",
 prefer short common words, avoid tongue-twisters, keep technical terms but place them where they fit.
+Write normal whole words. Never split a word into syllables with spaces or hyphens.
 """
     if playbook:
         user += "\nLessons from earlier songs:\n" + "\n".join(f"- {tip}" for tip in playbook)
     if previous:
         user += f"\nPrevious attempt:\n{previous}\n\nWhat went wrong and must be fixed:\n{feedback}\n" \
                 "Keep lines that had no problems unchanged."
+    if locked:
+        user += "\nThese lines were sung clearly and are locked; return them exactly as written:\n" + \
+                "\n".join(f"line {i + 1}: {text}" for i, text in sorted(locked.items()))
     user += '\nReturn JSON: {"lines": [7 strings]}'
     lines = _chat_json(WRITER, "You are a songwriter who writes precise, singable educational lyrics.", user)["lines"]
-    return _lyrics_text([str(line).strip() for line in lines])
+    lines = [str(line).strip() for line in lines]
+    for i, text in (locked or {}).items():  # enforce locks even if the writer ignored them
+        if i < len(lines):
+            lines[i] = text
+    return _lyrics_text(lines)
 
 
 @weave.op
@@ -117,10 +125,10 @@ def fact_coverage(lyrics: str, facts: dict) -> dict:
     answers = _chat_json(QUIZ_TAKER,
         "Answer only from the song lyrics you are given. If the lyrics do not say, answer \"unknown\".",
         f"Lyrics:\n{lyrics}\n\nQuestions:\n" + "\n".join(f"{i + 1}. {q['question']}" for i, q in enumerate(quiz))
-        + '\nReturn JSON: {"answers": [one string per question]}')["answers"]
+        + '\nReturn JSON: {"answers": [one string per question]}', temperature=0)["answers"]
     grades = _chat_json(WRITER, "You grade quiz answers strictly but accept paraphrases.",
         json.dumps([{"question": q["question"], "key": q["answer"], "given": a} for q, a in zip(quiz, answers)])
-        + '\nReturn JSON: {"correct": [true/false per item]}')["correct"]
+        + '\nReturn JSON: {"correct": [true/false per item]}', temperature=0)["correct"]
     items = [{"question": q["question"], "key": q["answer"], "given": a, "correct": bool(c)}
              for q, a, c in zip(quiz, answers, grades)]
     return {"fact_coverage": round(sum(i["correct"] for i in items) / max(len(quiz), 1), 3), "items": items}
@@ -133,6 +141,9 @@ def _text_feedback(fit: dict, coverage: dict) -> str:
         notes.append(f"write exactly {len(pipeline.PHRASE_BUDGET)} lines")
     notes += [f"a listener could not answer \"{i['question']}\" (answer: {i['key']})"
               for i in coverage["items"] if not i["correct"]]
+    taught = [i["key"] for i in coverage["items"] if i["correct"]]
+    if taught and notes:
+        notes.append("already taught correctly, do not lose these: " + "; ".join(taught))
     return "\n".join(notes)
 
 
@@ -144,8 +155,9 @@ def _listen_feedback(asr: dict, threshold: float = 0.85) -> str:
 
 
 @weave.op
-def text_pass(facts: dict, feedback: str | None, previous: str | None, playbook: list[str] | None) -> dict:
-    lyrics = write_lyrics(facts, feedback, previous, playbook)
+def text_pass(facts: dict, feedback: str | None, previous: str | None, playbook: list[str] | None,
+              locked: dict[int, str] | None = None) -> dict:
+    lyrics = write_lyrics(facts, feedback, previous, playbook, locked)
     fit = pipeline.syllable_fit(lyrics)
     coverage = fact_coverage(lyrics, facts)
     return {"lyrics": lyrics, **fit, **coverage}
@@ -163,6 +175,7 @@ def render_pass(lyrics: str, out_dir: str) -> dict:
 @weave.op
 def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passes: int = 3,
              fit_target: float = 0.95, coverage_target: float = 0.67, intelligibility_target: float = 0.9,
+             line_target: float = 0.85,
              playbook: list[str] | None = None, progress_path: str | None = None) -> dict:
     history = []
 
@@ -175,16 +188,22 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
     facts = extract_facts(source)
     log({"step": "facts", "topic": facts["topic"], "facts": facts["facts"]})
 
-    lyrics, feedback, best = None, None, None
+    lyrics, feedback, best, listen_notes, locked = None, None, None, "", {}
     for r in range(max_render_passes):
+        draft = None
         for t in range(max_text_passes):
-            result = text_pass(facts, feedback, lyrics, playbook)
+            result = text_pass(facts, feedback, lyrics, playbook, locked)
             lyrics = result["lyrics"]
             log({"step": "text", "render_pass": r + 1, "text_pass": t + 1, "lyrics": lyrics,
+                 "locked_lines": sorted(i + 1 for i in locked),
                  "syllable_fit": result["syllable_fit"], "fact_coverage": result["fact_coverage"]})
+            if draft is None or result["syllable_fit"] * result["fact_coverage"] > draft["syllable_fit"] * draft["fact_coverage"]:
+                draft = result
             if result["syllable_fit"] >= fit_target and result["fact_coverage"] >= coverage_target:
                 break
-            feedback = _text_feedback(result, result)
+            # Keep the listener's complaints in view while fixing syllables and facts.
+            feedback = "\n".join(filter(None, [_text_feedback(result, result), listen_notes]))
+        result, lyrics = draft, draft["lyrics"]  # render the best draft, not the last one
 
         heard = render_pass(lyrics, str(pipeline.HACK / f"runs/{run_name}/render-{r + 1}"))
         log({"step": "render", "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
@@ -196,9 +215,12 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
             best = {"score": round(score, 3), "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
                     "intelligibility": heard["intelligibility"], "fact_coverage": result["fact_coverage"],
                     "syllable_fit": result["syllable_fit"]}
-        if heard["intelligibility"] >= intelligibility_target:
+        worst_line = min(l["score"] for l in heard["lines"])
+        if heard["intelligibility"] >= intelligibility_target and worst_line >= line_target:
             break
-        feedback = _listen_feedback(heard)
+        listen_notes = feedback = _listen_feedback(heard, line_target)
+        # Lock clearly sung lines so the next rewrite cannot regress them.
+        locked = {i: l["line"] for i, l in enumerate(heard["lines"]) if l["score"] >= line_target}
 
     log({"step": "done", "best": best})
     return {"topic": facts["topic"], "best": best, "history": history}
