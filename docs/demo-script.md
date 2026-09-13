@@ -40,12 +40,33 @@ A second take is fine; small timing drift is corrected when compositing.
 **1:50 – 2:02 · How it learns**
 > Across songs, it proposes its own rules. Each one has to win an A/B test on forty drafts from pages it hasn't seen. Only three of eighteen made the cut.
 
-**2:02 – 2:32 · Under the hood** (your face fills the big circle; the cards appear at 2:03, 2:11 and 2:19)
+**2:02 – 2:32 · Under the hood** (your face fills the big circle on the left)
+
+*On screen, 2:02 – 2:12: the scoring rubric table. Glance at it as you talk through the three scores.*
 > Here's how we score it. Every line gets checked three ways: Whisper tells us whether it was heard clearly, we measure how much of the source's own wording survived in order, and we match syllables to the melody's notes.
->
+
+*On screen, 2:13: "Dataset so far".*
 > So far the loop has written 225 lyric drafts and sung 184 takes, and we scored about 960 more drafts while testing rules. Every one of them is traced in Weave.
->
+
+*On screen, 2:19: "Next: fine-tuning".*
 > Next, we'll fine-tune a small writer on the best of those lyrics and serve it on W&B Inference, so first drafts start close to finished.
 
 **2:32 – 2:38 · Close**
 > Everything runs on a marimo molab GPU. Thanks for watching.
+
+## Rubric reference (for questions)
+
+The same table is saved as `docs/rubric.png` for slides and the submission page. Targets are the defaults in
+`loop.run_faithful`.
+
+| Score | How it's measured | Target | What the loop does with it |
+|---|---|---|---|
+| **Heard clearly** | Whisper large-v3 transcribes the sung take; each lyric line is compared to what was heard letter by letter, with numbers spelled out on both sides | song ≥ 90% and every line ≥ 85% | stop when met; lock lines at 85%+; send misheard lines back with what was heard |
+| **Faithful to the text** | Content words from the source, matched in order against the lyrics; dropped words and added words both lower it (weighted toward keeping words) | ≥ 85% | stop rewriting text when met together with syllable fit |
+| **Syllable fit** | Syllables per line from the CMU pronunciation dictionary vs. notes in that melody phrase, allowing ±1 | ≥ 90% | same; off-budget lines get specific feedback |
+| **Melody check** | SheetSage2 re-transcribes the kept take and compares its notes to the original melody | guardrail | reported only; YuE2 holds the melody even when words fail |
+
+- **Best of 3 takes:** average of the song's clarity and its worst line, so one garbled line can't hide behind a good average.
+- **Best pass:** heard clearly × faithful to the text.
+- **No LLM grades these three scores.** Whisper and SheetSage2 are models, but the scores themselves are computed by code.
+- **Summary mode** adds LLM-based scores (facts taught via a quiz, naturalness via a judge); those are the ones the rule A/B tests use.
