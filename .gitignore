@@ -10,3 +10,4 @@ song.*
 *.flac
 *.abc
 .claude/settings.local.json
+results/
