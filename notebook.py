@@ -33,8 +33,10 @@ def _():
 
 @app.cell(hide_code=True)
 def demo_controls(Path, json, mo, sys):
-    DEMO_CODE = "/home/marimo/hack/branches/faithful"
-    DEMO_RUNS = Path("/home/marimo/hack/runs")
+    # Use local paths for ~/.yue2/ directory
+    DEMO_CODE = str(Path(__file__).parent / "sandbox")
+    DEMO_RUNS = Path.home() / ".yue2/runs"
+    DEMO_RUNS.mkdir(parents=True, exist_ok=True)
     FAITHFUL = "Sing the text"
     SUMMARY = "Teach the key facts"
     if DEMO_CODE not in sys.path:
