@@ -1,69 +1,117 @@
-# yue2 — listen to what you read
+# yue2: listen to what you read
 
-CoreWeave Hacks project (Sep 2026). An autonomous loop that turns a webpage or textbook
-section into a song set to an existing melody, then checks and rewrites its own output until
-the song is faithful to the source, singable, and intelligible.
+CoreWeave Hacks: Agent Loops (Sep 12–13, 2026). We're building an app to make and remix music. This
+weekend's question: can it sing what you're reading?
 
-## How it works
+Give it a paragraph from a web page or textbook. An autonomous loop sets the paragraph's own words to an
+existing melody (the demo uses *Island in the Sun* by Weezer), sings it, listens back, and rewrites whatever
+it can't hear clearly, until the song is clear, faithful to the text and fits the tune. Across songs, it
+proposes rules for itself and keeps only the ones that win an A/B test.
+
+**Demo video:** attached to the [hackathon-submission release](../../releases/tag/hackathon-submission)
+(2:49, with voiceover). **Traces and evaluations:** [Weave project](https://wandb.ai/sanatmouli-scoredata/yue2/weave).
+
+## The loop
 
 ```
-source text → key facts → lyrics fitted to the melody's syllable budget
-      ↑                                   ↓
-rewrite weak lines ← scorers ← YuE2 render (cot="melody", transcribed melody ABC)
-                     melody fidelity · intelligibility · syllable fit · fact coverage
+paragraph ──► TEXT PASSES (seconds, up to 4)
+              Gemma 4 31B fits the source's words to the melody's phrases
+              score: syllable fit · faithful to the text  ──► feedback ──► rewrite
+                        │ best draft
+              RENDER PASSES (minutes, up to 3)
+              YuE2 sings 3 takes in parallel (new seeds each pass) on a marimo molab GPU
+              Whisper checks every line; keep the clearest take; SheetSage2 melody guardrail
+              lock clear lines ──► send misheard lines back with what was heard
+                        │ best pass (heard clearly × faithful)
+              karaoke player: song lines and the source words highlight as they're sung
+
+across songs: coach proposes rules ──► A/B test on 40 first drafts from 8 new pages ──► keep if it helps
 ```
 
-- **YuE2-3B** renders new lyrics over a melody score.
-- **SheetSage2** transcribes the source track into a melody score, and re-transcribes each
-  render to verify it still follows that melody.
-- **W&B Inference** serves the LLMs: DeepSeek-V4-Pro writes and grades lyrics, Qwen3-30B takes
-  the fact quiz.
-- **W&B Weave** traces every loop run: each step is a `weave.op`, and inference calls are traced
-  with their token usage. Traces: [sanatmouli-scoredata/yue2](https://wandb.ai/sanatmouli-scoredata/yue2/weave).
-- **molab** (marimo on CoreWeave) hosts the GPU notebook and the demo UI.
+Two modes share the engine:
+- **Faithful** (default): sing the paragraph itself. Allowed edits: split sentences at pauses, drop filler
+  words, contractions, numbers and symbols written out as spoken; never paraphrase.
+- **Summary**: extract six key facts and teach them, scored with a quiz and a naturalness judge.
 
-## Status
+## Scoring rubric
 
-| Step | Result |
+![Scoring rubric](docs/rubric.png)
+
+| Score | How it's measured | Target | What the loop does with it |
+|---|---|---|---|
+| **Heard clearly** | Whisper transcribes the take; each line compared letter by letter, numbers spelled out on both sides | song ≥ 90%, every line ≥ 85% | stop; lock clear lines; feed back misheard lines |
+| **Faithful to the text** | Source content words matched in order (LCS), F2 of kept vs. added | ≥ 85% | stop rewriting text |
+| **Syllable fit** | CMU-dictionary syllables vs. notes per melody phrase, ±1 | ≥ 90% | stop rewriting text; line-level feedback |
+| **Melody check** | SheetSage2 re-transcribes the take; notes vs. the original | guardrail | reported only |
+
+Best of 3 takes = mean of song clarity and its worst line. Best pass = heard clearly × faithful. None of these
+three core scores is graded by an LLM. Summary mode adds LLM-based scores: facts taught (a quiz answered from the
+lyrics alone, then graded) and naturalness (a judge).
+
+## Results
+
+| What | Result |
 |---|---|
-| YuE2 smoke test | 59s of audio in 30s, 9 GB VRAM peak (RTX PRO 6000 Blackwell) |
-| Source melody transcription | 24s, no warnings; verse phrases 7/7/7/7 notes |
-| Cover render, verse + chorus | 40s of audio in 18s |
-| Melody fidelity of cover | 97.4% pitch-sequence match against the source |
-| Intelligibility (Whisper large-v3) | 100% of words heard correctly on cover v1 |
-| Control test: medium / bad lyrics | intelligibility 1.00 → 0.28 → 0.00; syllable fit 1.00 → 0.79 → 0.39; melody fidelity 0.97 → 0.99 → 0.96 (guardrail only) |
-| Loop run 3 (black holes) | intelligibility 0.88 → 0.96 across render passes at 100% fact coverage; traced in Weave |
+| Scorer control test (fitted / medium / overstuffed lyrics) | heard clearly 1.00 → 0.28 → 0.00; melody check stays 0.96–0.99, so it is a guardrail, not a lyric signal |
+| Faithfulness score sanity check | light trim 1.00, synonyms 0.67, paraphrase 0.08 |
+| Faithful mode, Calvin cycle paragraph | heard clearly 0.17 at 115 BPM → 0.76 after 90 BPM, new seeds per pass and faithful feedback (faithfulness 0.81) |
+| Faithful mode, Industrial Revolution paragraph | heard clearly 0.63 → 0.80 over 3 passes, faithfulness 0.88 |
+| Tempo diagnostic, same lyrics | 115 BPM 0.17, 90 BPM 0.52 |
+| Take variance, same lyrics | 0.22 to 0.81 across seeds |
+| Summary mode, black holes | heard clearly 0.88 → 0.96 across passes; best-of-3 reached every target in one pass |
 | Loop run, photosynthesis (3 takes) | one Weave trace: 17 W&B Inference calls (~11k tokens), 5 text passes, 9 takes rendered |
+| Writer bake-off (Weave Evaluation, corrected scorer) | Gemma 4 31B best: syllable fit 0.97, facts 0.67, naturalness 0.50. Reasoning models (Kimi, GLM, MiniMax, Nemotron) mostly returned no lyrics |
+| Ungated playbook, 4 held-out pages | final score 0.74 → 0.84, but syllable fit 0.98 → 0.92 and naturalness 0.44 → 0.31; no first-draft gain on 8 new pages |
+| Gated playbook, 6 training songs | 3 of 18 proposed rules kept (+0.035, +0.039, +0.044); rejected rules ranged down to −0.057 |
+| Data produced | 32 loop runs, 225 lyric drafts, 184 sung takes, 68 render passes; ~960 drafts scored in rule A/B tests |
+
+### Bugs the evaluations caught
+- **Facts taught read grader replies with `bool()`**, so a reply of `"false"` counted as correct: unrelated lyrics
+  scored 1.0 on an immune-system quiz. Fixed; unrelated lyrics now score 0.0, lyrics stating the facts 1.0.
+- **The quiz taker used outside knowledge** instead of the lyrics alone. Fixed in the prompt and verified.
+- **Clarity and facts oscillated** when every pass rewrote the whole song. Fixed by locking clear lines and
+  rendering the best draft, not the last.
+- **Faithful mode got stuck**: the listener asked to reword, faithful rules forbid it, and the same seed rendered
+  the same song. Fixed with new seeds per pass and feedback that respects faithfulness.
+
+### Not finished
+- The held-out comparison for the **gated** playbook: W&B Inference returned `insufficient_quota` after the first
+  of four test pages.
+- **No model weights were trained.** The loop learns rules, not parameters. Next step: fine-tune a small writer
+  on the loop's best lyrics and serve it as a LoRA on W&B Inference.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `notebook.py` | molab notebook (edited live through `marimo pair`); the demo UI is at the top |
-| `sandbox/loop.py` | the loop: facts, lyric passes, render passes with best-of-N takes, source alignment |
-| `sandbox/singalong.py` | sing-along player widget: highlights the sung line and its source sentence |
-| `sandbox/setup.sh` | one-time install on the molab sandbox |
-| `sandbox/transcribe.sh` | SheetSage2 transcription of the source track |
-| `sandbox/asr_score.py` | intelligibility scorer: Whisper transcript vs intended lyrics, per line |
-| `requests/` | YuE2 song requests (style + lyrics) |
-
-Audio files and transcribed scores of the source track are gitignored and not distributed.
-
-## Demo
-
-In the notebook, paste a URL and press **Make the song**. Progress cards show each render pass
-(heard clearly, facts taught, syllable fit, and every take). When the loop finishes, the player
-highlights each lyric line as it is sung next to the source sentence it teaches.
+| `sandbox/loop.py` | the loop: summary mode (`run_loop`) and faithful mode (`run_faithful`), text and render passes, best-of-N takes |
+| `sandbox/pipeline.py` | YuE2 render, syllable fit, SheetSage2 melody check, Whisper intelligibility (each model in its own venv) |
+| `sandbox/faithful.py` | faithfulness score, number normalization, source-word spans for karaoke |
+| `sandbox/melody.py` | melody profile: sections and phrases detected from the transcription; tempo control |
+| `sandbox/asr_score.py` | Whisper transcript vs. intended lyrics, per line, with sung time spans |
+| `sandbox/playbook.py`, `batch.py`, `experiment.sh` | coach, A/B-gated rule learning, batch runs logged as Weave evaluations |
+| `sandbox/bakeoff.py` | Weave Evaluation of open-weight lyric writers on W&B Inference |
+| `sandbox/singalong.py` | anywidget karaoke player |
+| `notebook.py` | molab notebook with the demo UI (mode switch, paragraph picker, live progress, player) |
+| `sandbox/demo_video.py`, `talk_segment.py` | demo video renderer (PIL + ffmpeg) and the Under the hood block |
+| `tools/final_cut.py` | assembles the final video with the facecam recording, placed by word timestamps |
+| `docs/demo-script.md` | voiceover script and rubric reference |
+| `docs/rubric.png` | the rubric as an image |
+| `sandbox/setup.sh`, `setup_asr.sh`, `transcribe.sh` | sandbox installs and source-track transcription |
 
 ## Setup
 
 1. Open a notebook on [molab](https://molab.marimo.io/), attach the GPU, and choose **Pair with an agent**.
 2. `cp .env.example .env` and fill in `WANDB_API_KEY` and `MARIMO_TOKEN`.
-3. Run `sandbox/setup.sh` on the sandbox (detached; about 10 minutes).
+3. On the sandbox: `sandbox/setup.sh`, `sandbox/setup_asr.sh`, then `sandbox/transcribe.sh` on your source track.
 
-molab sets `PYTHONSAFEPATH=1` and a kernel `PYTHONPATH` that leak into subprocess venvs; run
-sandbox scripts with `env -u PYTHONPATH -u PYTHONSAFEPATH`.
+molab sets `PYTHONSAFEPATH=1` and a kernel `PYTHONPATH` that leak into subprocess venvs, so sandbox scripts run
+with `env -u PYTHONPATH -u PYTHONSAFEPATH`. molab sessions end after 12 hours (or 90 idle minutes) and take the
+work folder with them; back up renders you want to keep.
 
-## Licenses
+## Licenses and rights
 
-YuE2 and SheetSage2 weights are CC BY-NC 4.0: noncommercial use only.
+- This repo has no license file yet, so the code is all rights reserved by default. YuE2's code is Apache 2.0.
+- **YuE2 and SheetSage2 weights are CC BY-NC 4.0**: noncommercial use only.
+- The demo sets new lyrics to the melody of *Island in the Sun* (Weezer) for a noncommercial hackathon demo. The
+  original recording is not distributed; audio files and transcribed scores of it are gitignored.
