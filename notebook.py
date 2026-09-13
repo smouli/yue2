@@ -41,8 +41,14 @@ def demo_controls(Path, json, mo, sys):
         sys.path.insert(0, DEMO_CODE)
     for _module in ("singalong", "faithful"):
         sys.modules.pop(_module, None)  # pick up this branch's versions
-    import singalong
-    import faithful as demo_faithful
+    try:
+        import singalong
+        import faithful as demo_faithful
+    except ImportError:
+        class singalong:
+            pass
+        class demo_faithful:
+            pass
 
     get_demo_run, set_demo_run = mo.state(None)
     get_demo_done, set_demo_done = mo.state(None)
