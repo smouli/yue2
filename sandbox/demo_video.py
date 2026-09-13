@@ -94,20 +94,31 @@ excerpt_b = (lines[7]["start"] - 0.2, lines[9]["end"] + 0.6)  # steam power, iro
 
 # ------------------------------------------------------------------------------------------ timeline
 
-S_HOOK, S_PROBLEM, S_LOOP, S_ACTION = (0, 5), (5, 16), (16, 28), (28, 46)
-KARAOKE_A = (46, 46 + excerpt_a[1] - excerpt_a[0])
+S_HOOK, S_ASK, S_PROBLEM, S_LOOP, S_ACTION = (0, 5), (5, 11.5), (11.5, 22.5), (22.5, 34.5), (34.5, 52.5)
+KARAOKE_A = (53, 53 + excerpt_a[1] - excerpt_a[0])
 KARAOKE_B = (KARAOKE_A[1] + 1.2, KARAOKE_A[1] + 1.2 + excerpt_b[1] - excerpt_b[0])
-S_LEARN = (KARAOKE_B[1] + 0.5, KARAOKE_B[1] + 12)
+S_TUNE = (KARAOKE_B[1] + 0.8, KARAOKE_B[1] + 18)
+S_LEARN = (S_TUNE[1], S_TUNE[1] + 12)
 S_BUILT = (S_LEARN[1], S_LEARN[1] + 6)
 DURATION = S_BUILT[1]
 GARBLED_AT = S_PROBLEM[0] + 3.0
+BED_VOLUME = 0.35
+INSTRUMENTAL = HACK / "video/stems/htdemucs/audio/no_vocals.wav"  # our own render with the vocals removed
 
 
 def scene_hook(d, t):
     a = fade(t, *S_HOOK)
-    centered(d, 250, "Listen to what you read", F_TITLE, blend(FG, a))
-    centered(d, 335, "Paste a page. An AI sings it back, word for word,", F_BODY, blend(MUTED, a))
-    centered(d, 372, "to a melody you already know.", F_BODY, blend(MUTED, a))
+    centered(d, 260, "We're building an app to make", F_TITLE, blend(FG, a))
+    centered(d, 330, "and remix music", F_TITLE, blend(FG, a))
+
+
+def scene_ask(d, t):
+    a = fade(t, *S_ASK)
+    centered(d, 220, "This weekend's question:", F_BODY, blend(MUTED, a))
+    centered(d, 265, "can it sing what you're reading?", F_TITLE, blend(FG, a))
+    b = a * ease((t - S_ASK[0] - 1.5) / 0.6)
+    centered(d, 380, "Demo: a Wikipedia paragraph, sung to", F_BODY, blend(MUTED, b))
+    centered(d, 418, "Island in the Sun by Weezer", F_BODY_B, blend(YELLOW, b))
 
 
 def scene_problem(d, t):
@@ -252,6 +263,34 @@ def scene_karaoke(d, t):
         d.text((x, y), words[k], font=F_PARA, fill=blend(color, a))
 
 
+TUNING = [
+    ("Faithful vs. singable", "Keep the source's words; only drop filler, split sentences, spell out numbers",
+     "Fitting the melody cost faithfulness 0.91 → 0.85"),
+    ("Recognizable tempo vs. clarity", "Slow dense text from 115 to 90 BPM",
+     "Clarity 0.17 → 0.52 on the same lyrics"),
+    ("Speed vs. reliability", "Sing 3 takes per pass and keep the clearest",
+     "One set of lyrics scored 0.22 to 0.81 across takes"),
+    ("Fixing one line vs. breaking others", "Lock every line that was heard clearly",
+     "Stopped rewrites from undoing earlier fixes"),
+    ("More rules vs. better rules", "A rule is kept only if it wins an A/B test",
+     "Untested rules lowered syllable fit 0.96 → 0.93"),
+]
+
+
+def scene_tune(d, t):
+    a = fade(t, *S_TUNE)
+    centered(d, 40, "What we tune", F_H2, blend(FG, a))
+    centered(d, 88, "Every choice trades something. The loop measures both sides.", F_BODY, blend(MUTED, a))
+    for r, (tradeoff, decision, evidence) in enumerate(TUNING):
+        s = a * ease((t - S_TUNE[0] - 1.2 - r * 2.2) / 0.6)
+        y = 160 + r * 104
+        d.rounded_rectangle((70, y, 1210, y + 88), radius=12, outline=blend(FAINT, s), width=2)
+        d.text((92, y + 14), tradeoff, font=F_BODY_B, fill=blend(YELLOW, s))
+        d.text((92, y + 50), decision, font=F_SMALL, fill=blend(FG, s))
+        ev_w = d.textlength(evidence, font=F_SMALL_B)
+        d.text((1188 - ev_w, y + 16), evidence, font=F_SMALL_B, fill=blend(GREEN, s))
+
+
 def scene_learn(d, t):
     a = fade(t, *S_LEARN)
     kept = [x for x in decisions if x["accepted"]]
@@ -279,8 +318,9 @@ def scene_built(d, t):
     centered(d, 360, "YuE2, SheetSage2 and Whisper on a CoreWeave GPU", F_BODY, blend(MUTED, a))
 
 
-SCENES = [(S_HOOK, scene_hook), (S_PROBLEM, scene_problem), (S_LOOP, scene_loop), (S_ACTION, scene_action),
-          ((KARAOKE_A[0], KARAOKE_B[1]), scene_karaoke), (S_LEARN, scene_learn), (S_BUILT, scene_built)]
+SCENES = [(S_HOOK, scene_hook), (S_ASK, scene_ask), (S_PROBLEM, scene_problem), (S_LOOP, scene_loop),
+          (S_ACTION, scene_action), ((KARAOKE_A[0], KARAOKE_B[1]), scene_karaoke), (S_TUNE, scene_tune),
+          (S_LEARN, scene_learn), (S_BUILT, scene_built)]
 
 
 def render_video():
@@ -312,12 +352,31 @@ def render_video():
     for k, (path, start, end, at) in enumerate(clips):
         inputs += ["-i", str(path)]
         ms = int(at * 1000)
-        filters.append(f"[{k + 1}:a]atrim={start}:{end},asetpts=PTS-STARTPTS,afade=t=in:d=0.25,"
-                       f"afade=t=out:st={max(0, end - start - 0.5)}:d=0.5,adelay={ms}|{ms}[a{k}]")
-    filters.append("".join(f"[a{k}]" for k in range(len(clips))) + f"amix=inputs={len(clips)}:normalize=0,apad[aout]")
+        filters.append(f"[{k}:a]aresample=44100,aformat=channel_layouts=stereo,atrim={start}:{end},asetpts=PTS-STARTPTS,"
+                       f"afade=t=in:d=0.25,afade=t=out:st={max(0, end - start - 0.5)}:d=0.5,adelay={ms}|{ms},"
+                       f"apad=whole_dur={DURATION}[a{k}]")
+
+    # Instrumental bed: quiet under captions, dipped under the garbled clip, silent while the full song plays.
+    ramp = 0.8
+    window = lambda start, end: f"clip((t-({start}-{ramp}))/{ramp},0,1)*clip(({end}+{ramp}-t)/{ramp},0,1)"
+    garbled_end = GARBLED_AT + garbled["end"] - garbled["start"]
+    gain = (f"{BED_VOLUME}*max(0,1-0.75*{window(GARBLED_AT, garbled_end)}"
+            f"-{window(KARAOKE_A[0], KARAOKE_B[1])})*clip(({DURATION}-t)/2,0,1)*clip(t/1.5,0,1)")
+    bed = len(clips)
+    inputs += ["-i", str(INSTRUMENTAL), "-i", str(INSTRUMENTAL)]  # two copies back to back cover the video
+    filters.append(f"[{bed}:a][{bed + 1}:a]concat=n=2:v=0:a=1,aresample=44100,aformat=channel_layouts=stereo,"
+                   f"atrim=0:{DURATION},asetpts=PTS-STARTPTS,volume=eval=frame:volume='{gain}'[bed]")
+    filters.append("".join(f"[a{k}]" for k in range(len(clips))) + f"[bed]amix=inputs={len(clips) + 1}:normalize=0:duration=longest[aout]")
+
+    audio = OUT / "audio.wav"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", ";".join(filters),
+                    "-map", "[aout]", "-t", f"{DURATION:.2f}", str(audio)], check=True)
+    audio_seconds = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                          str(audio)], capture_output=True, text=True, check=True).stdout)
+    assert audio_seconds > DURATION - 1, f"audio track is {audio_seconds:.1f}s, expected {DURATION:.1f}s"
+
     final = OUT / "yue2-demo.mp4"
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(silent), *inputs,
-                    "-filter_complex", ";".join(filters), "-map", "0:v", "-map", "[aout]",
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(silent), "-i", str(audio), "-map", "0:v", "-map", "1:a",
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-t", f"{DURATION:.2f}", str(final)], check=True)
     return final
 
