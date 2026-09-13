@@ -72,7 +72,22 @@ function render({ model, el }) {
       return li;
     }));
 
-    // One paragraph per distinct source sentence, in song order.
+    const words = model.get("source_words") || [];
+    if (words.length) {
+      // Faithful mode: the source paragraph itself, word by word.
+      const p = document.createElement("p");
+      p.className = "sa-karaoke";
+      words.forEach((w, i) => {
+        const span = document.createElement("span");
+        span.textContent = w + " ";
+        span.dataset.w = i;
+        p.append(span);
+      });
+      sourceEl.replaceChildren(p);
+      return;
+    }
+
+    // Summary mode: one paragraph per distinct source sentence, in song order.
     const seen = new Map();
     const paras = [];
     timed.forEach((l, i) => {
@@ -93,6 +108,21 @@ function render({ model, el }) {
     const t = audio.currentTime;
     const current = timed.findIndex((l, i) => t >= l.start && t < (timed[i + 1] ? timed[i + 1].start : Infinity));
     linesEl.querySelectorAll("li").forEach((li) => li.classList.toggle("on", Number(li.dataset.i) === current));
+    const karaoke = sourceEl.querySelector(".sa-karaoke");
+    if (karaoke) {
+      const span = current >= 0 ? timed[current].span : null;
+      let first = null;
+      karaoke.querySelectorAll("span").forEach((el) => {
+        const i = Number(el.dataset.w);
+        const on = !!span && i >= span[0] && i <= span[1];
+        const sung = !!span && i < span[0];
+        if (on && !first) first = el;
+        el.classList.toggle("on", on);
+        el.classList.toggle("sung", sung);
+      });
+      if (first) first.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      return;
+    }
     sourceEl.querySelectorAll("p").forEach((p) => {
       const on = current >= 0 && p.dataset["line" + current] === "1";
       if (on && !p.classList.contains("on")) p.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -127,6 +157,10 @@ _CSS = """
 .sa-source { max-height: 300px; overflow-y: auto; padding-right: 6px; }
 .sa-source p { margin: 0 0 8px; padding: 6px 8px; border-radius: 8px; opacity: .6; transition: opacity .2s, background .2s; }
 .sa-source p.on { opacity: 1; background: color-mix(in srgb, #3aa6f5 22%, transparent); }
+.sa-source p.sa-karaoke { opacity: 1; font-size: 15px; line-height: 1.8; }
+.sa-karaoke span { border-radius: 4px; transition: background .15s, opacity .15s; opacity: .55; }
+.sa-karaoke span.sung { opacity: .85; }
+.sa-karaoke span.on { opacity: 1; background: color-mix(in srgb, #3aa6f5 30%, transparent); }
 """
 
 
@@ -137,13 +171,17 @@ class SingAlong(anywidget.AnyWidget):
     topic = traitlets.Unicode("").tag(sync=True)
     url = traitlets.Unicode("").tag(sync=True)
     lines = traitlets.List([]).tag(sync=True)
+    source_words = traitlets.List([]).tag(sync=True)
 
 
 def from_result(done_event: dict, facts_event: dict, mp3_path: Path) -> SingAlong:
     """Build the player from a finished loop's progress events."""
     best = done_event["best"]
     by_line = {a["line"]: a["source_sentence"] for a in best.get("alignment", [])}
+    spans = best.get("source_spans") or []
     lines = [{"text": l["line"], "start": l.get("start"), "end": l.get("end"), "score": l.get("score"),
-              "source": by_line.get(l["line"], "")} for l in best.get("lines", [])]
+              "source": by_line.get(l["line"], ""), "span": spans[i] if i < len(spans) else None}
+             for i, l in enumerate(best.get("lines", []))]
     audio = "data:audio/mpeg;base64," + base64.b64encode(Path(mp3_path).read_bytes()).decode()
-    return SingAlong(audio_src=audio, topic=facts_event["topic"], url=facts_event.get("url", ""), lines=lines)
+    return SingAlong(audio_src=audio, topic=facts_event["topic"], url=facts_event.get("url", ""), lines=lines,
+                     source_words=best.get("source_words") or [])
