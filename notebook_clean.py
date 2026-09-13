@@ -214,16 +214,18 @@ def demo_progress(
     set_demo_done,
     get_demo_done,
 ):
-    """Show progress of song generation"""
+    """Show real-time progress of song generation"""
     _run = get_demo_run()
     mo.stop(_run is None, mo.md("_Press **Make the song** to start_"))
 
     _events_path = DEMO_RUNS / f"{_run}.progress.json"
     _log_path = DEMO_LOGS / f"loop-{_run}.log"
+    _result_path = DEMO_RUNS / f"{_run}.result.json"
 
     _events = json.loads(_events_path.read_text()) if _events_path.exists() else []
-    _log_text = _log_path.read_text() if _log_path.exists() else ""
-    _failed = "Traceback" in _log_text
+    _log_text = _log_path.read_text() if _log_path.exists() else "⏳ Waiting for logs to appear..."
+    _has_result = _result_path.exists()
+    _failed = "Traceback" in _log_text or "Error" in _log_text
     _done = bool(_events) and _events[-1]["step"] == "done"
 
     if _done and get_demo_done() != _run:
@@ -234,19 +236,51 @@ def demo_progress(
     _renders = [e for e in _events if e["step"] == "render"]
 
     if _failed:
-        _status = "❌ The loop crashed"
+        _status = "❌ Process crashed"
     elif _done:
-        _status = "✅ Done. Press play below"
-    elif not _facts:
-        _status = "📖 Reading the page…"
+        _status = "✅ Done! Song generated"
+    elif _has_result:
+        _status = "📝 Finalizing..."
+    elif _renders:
+        _status = f"🎵 Rendering (pass {len(_renders)})"
+    elif _texts:
+        _status = f"✍️ Writing lyrics (draft {len(_texts)})"
+    elif _facts:
+        _status = f"📊 Processing facts"
     else:
-        _status = f"✍️ Processing (drafts: {len(_texts)}, renders: {len(_renders)})"
+        _status = f"📖 Starting up..."
 
     mo.vstack([
-        mo.md(f"### {_run}"),
+        mo.md(f"### Run: `{_run}`"),
         mo.md(f"**{_status}**"),
-        mo.plain_text(_log_text[-1500:]) if _failed else mo.md(""),
+        mo.md(f"Events: {len(_events)} | Drafts: {len(_texts)} | Renders: {len(_renders)}"),
+        mo.accordion({
+            "📋 Live logs": mo.plain_text(_log_text[-2000:]),
+        }),
     ])
+    return
+
+
+@app.cell(hide_code=True)
+def debug_info(DEMO_RUNS, DEMO_LOGS, DEMO_CODE, Path, mo, subprocess):
+    """Show debug info about what's running"""
+    _run_files = sorted(DEMO_RUNS.glob("*.progress.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    _log_files = sorted(DEMO_LOGS.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+    _info = f"""
+    **System Info:**
+    - Sandbox: `{DEMO_CODE}`
+    - Runs dir: `{DEMO_RUNS}` ({len(list(DEMO_RUNS.glob('*')))} items)
+    - Logs dir: `{DEMO_LOGS}` ({len(list(DEMO_LOGS.glob('*')))} items)
+
+    **Recent runs:**
+    """
+    for f in _run_files[:3]:
+        _mtime = f.stat().st_mtime
+        _size = f.stat().st_size
+        _info += f"\n- {f.name} ({_size} bytes)"
+
+    mo.accordion({"🔧 Debug info": mo.md(_info)})
     return
 
 
