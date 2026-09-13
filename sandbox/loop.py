@@ -467,7 +467,9 @@ def run_faithful(source: str, run_name: str, url: str = "", max_text_passes: int
     abc_file = str(melody.write_abc(profile, chosen, pipeline.HACK / f"runs/{run_name}/melody.abc", bpm))
     style = re.sub(r"\d+ BPM", f"{bpm} BPM, unhurried phrasing, every word clearly enunciated", STYLE)
     ranges = melody.source_ranges(chosen)
-    title = source.split(".")[0][:80]
+    page = url.rstrip("/").rsplit("/", 1)[-1].replace("_", " ") if url else ""
+    opening = " ".join(source.split()[:8])
+    title = f"{page}: “{opening}…”" if page else f"“{opening}…”"
     log({"step": "facts", "mode": "faithful", "topic": title, "facts": [], "url": url, "source": source,
          "sections": sections, "syllables_needed": needed, "bpm": bpm, "writer": WRITER, "playbook": playbook or []})
 

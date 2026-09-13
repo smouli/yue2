@@ -107,7 +107,11 @@ function render({ model, el }) {
   function highlight() {
     const t = audio.currentTime;
     const current = timed.findIndex((l, i) => t >= l.start && t < (timed[i + 1] ? timed[i + 1].start : Infinity));
-    linesEl.querySelectorAll("li").forEach((li) => li.classList.toggle("on", Number(li.dataset.i) === current));
+    linesEl.querySelectorAll("li").forEach((li) => {
+      const on = Number(li.dataset.i) === current;
+      if (on && !li.classList.contains("on")) li.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      li.classList.toggle("on", on);
+    });
     const karaoke = sourceEl.querySelector(".sa-karaoke");
     if (karaoke) {
       const span = current >= 0 ? timed[current].span : null;
@@ -149,12 +153,12 @@ _CSS = """
 .sa-audio { width: 100%; }
 .sa-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
 .sa h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; opacity: .7; }
-.sa-lines { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+.sa-lines { margin: 0; padding-left: 22px; display: grid; gap: 4px; max-height: 360px; overflow-y: auto; }
 .sa-lines li { padding: 6px 8px; border-radius: 8px; cursor: pointer; transition: background .2s, transform .2s; }
 .sa-lines li:hover { background: color-mix(in srgb, currentColor 7%, transparent); }
 .sa-lines li.on { background: color-mix(in srgb, #f5b82e 35%, transparent); font-weight: 600; transform: translateX(3px); }
 .sa-score { margin-left: 8px; font-size: 11px; opacity: .55; font-weight: 400; }
-.sa-source { max-height: 300px; overflow-y: auto; padding-right: 6px; }
+.sa-source { max-height: 360px; overflow-y: auto; padding-right: 6px; }
 .sa-source p { margin: 0 0 8px; padding: 6px 8px; border-radius: 8px; opacity: .6; transition: opacity .2s, background .2s; }
 .sa-source p.on { opacity: 1; background: color-mix(in srgb, #3aa6f5 22%, transparent); }
 .sa-source p.sa-karaoke { opacity: 1; font-size: 15px; line-height: 1.8; }
