@@ -41,14 +41,21 @@ def demo_controls(Path, json, mo, sys):
         sys.path.insert(0, DEMO_CODE)
     for _module in ("singalong", "faithful"):
         sys.modules.pop(_module, None)  # pick up this branch's versions
+
+    # Try to import local modules (they're in yue2/sandbox/)
     try:
         import singalong
         import faithful as demo_faithful
-    except ImportError:
+    except (ImportError, ModuleNotFoundError):
+        # Fallback stubs if modules not found
         class singalong:
-            pass
+            @staticmethod
+            def from_result(*args, **kwargs):
+                pass
         class demo_faithful:
-            pass
+            @staticmethod
+            def clean_source(text):
+                return text.strip()
 
     get_demo_run, set_demo_run = mo.state(None)
     get_demo_done, set_demo_done = mo.state(None)
