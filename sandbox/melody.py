@@ -98,10 +98,15 @@ def capacity(profile: dict) -> int:
     return MAX_REPEATS * sum(s.notes for s in profile["sections"] if s.name in SINGABLE)
 
 
-def write_abc(profile: dict, sections: list[Section], path: Path) -> Path:
+def tempo(profile: dict) -> int:
+    return int(next(re.search(r"=(\d+)", l).group(1) for l in profile["header"] if l.startswith("Q:")))
+
+
+def write_abc(profile: dict, sections: list[Section], path: Path, bpm: int | None = None) -> Path:
+    """Write the chosen sections as one score; `bpm` slows or speeds the melody (dense text needs it slower)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = list(profile["header"])
+    lines = [re.sub(r"^Q:1/4=\d+", f"Q:1/4={bpm}", l) if bpm else l for l in profile["header"]]
     for section in sections:
         lines += section.abc_lines
     path.write_text("\n".join(lines).rstrip() + "\n")

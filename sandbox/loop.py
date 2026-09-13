@@ -252,9 +252,9 @@ BASE_SEED = 831001
 
 
 @weave.op
-def render_take(lyrics: str, out_dir: str, seed: int, abc_file: str | None = None) -> dict:
+def render_take(lyrics: str, out_dir: str, seed: int, abc_file: str | None = None, style: str = STYLE) -> dict:
     """Sing the lyrics once and listen to the result."""
-    request = {"id": Path(out_dir).name, "style": STYLE, "lyrics": lyrics, "cot": "melody", "seed": seed}
+    request = {"id": Path(out_dir).name, "style": style, "lyrics": lyrics, "cot": "melody", "seed": seed}
     rendered = pipeline.render(request, Path(out_dir), Path(abc_file) if abc_file else pipeline.SOURCE_ABC)
     asr = pipeline.intelligibility(rendered["audio"], rendered["request"])
     worst_line = min(l["score"] for l in asr["lines"])
@@ -265,18 +265,20 @@ def render_take(lyrics: str, out_dir: str, seed: int, abc_file: str | None = Non
 
 @weave.op
 def render_pass(lyrics: str, out_dir: str, takes: int = 1, abc_file: str | None = None,
-                ranges: list[tuple[float, float]] | None = None) -> dict:
+                ranges: list[tuple[float, float]] | None = None, seed_offset: int = 0, style: str = STYLE) -> dict:
     """Render `takes` performances in parallel on the GPU and keep the clearest one.
 
     YuE2 regenerates the whole performance for any lyric change, so a line that was sung clearly
     can come out slurred next time. Extra takes spend spare GPU memory to beat that randomness.
     With takes=1 this is the original single render at the original path and seed.
     """
+    # A new seed per render pass: if the lyrics come back unchanged, the retry is still a different performance.
+    seed = BASE_SEED + seed_offset
     if takes == 1:
-        candidates = [render_take(lyrics, out_dir, BASE_SEED, abc_file)]
+        candidates = [render_take(lyrics, out_dir, seed, abc_file, style)]
     else:
         with ContextAwareThreadPoolExecutor(max_workers=takes) as pool:
-            candidates = list(pool.map(lambda k: render_take(lyrics, f"{out_dir}/take-{k + 1}", BASE_SEED + k, abc_file),
+            candidates = list(pool.map(lambda k: render_take(lyrics, f"{out_dir}/take-{k + 1}", seed + k, abc_file, style),
                                        range(takes)))
     chosen = max(candidates, key=lambda c: c["take_score"])
     melody = pipeline.melody_fidelity(chosen["audio"], ranges)  # guardrail check on the kept take only
@@ -324,7 +326,7 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
             feedback = "\n".join(filter(None, [_text_feedback(result, result), listen_notes]))
         result, lyrics = draft, draft["lyrics"]  # render the best draft, not the last one
 
-        heard = render_pass(lyrics, str(pipeline.HACK / f"runs/{run_name}/render-{r + 1}"), takes)
+        heard = render_pass(lyrics, str(pipeline.HACK / f"runs/{run_name}/render-{r + 1}"), takes, seed_offset=100 * r)
         log({"step": "render", "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
              "intelligibility": heard["intelligibility"], "melody_fidelity": heard["melody_fidelity"],
              "syllable_fit": result["syllable_fit"], "fact_coverage": result["fact_coverage"],
@@ -351,6 +353,8 @@ def run_loop(url: str, run_name: str, max_text_passes: int = 4, max_render_passe
 # ---------------------------------------------------------------------------------------------------------
 
 SYLLABLE_TOLERANCE = 1
+# Dense source text garbles at the song's 115 BPM; at 90 BPM clarity rose from 0.17 to 0.52 on the same lyrics.
+FAITHFUL_BPM = 90
 FILLER_SHARE = 0.85  # rough share of syllables left after dropping filler words; sizes the song
 
 
@@ -428,11 +432,23 @@ def _faithful_feedback(result: dict) -> str:
     return "\n".join(notes)
 
 
+def _faithful_listen_feedback(asr: dict, threshold: float = 0.85) -> str:
+    """Misheard lines, with fixes faithful mode allows (the writer must not reword the source)."""
+    misheard = [f"line \"{l['line']}\" was heard as \"{l['heard'] or '(nothing)'}\""
+                for l in asr["lines"] if l["score"] < threshold]
+    if not misheard:
+        return ""
+    return "\n".join(misheard) + (
+        "\nMake these lines clearer without changing the source's words: give long or technical words more room "
+        "by moving a word to a neighbouring line, drop filler words, put a hard term at the start of its line, "
+        "write acronyms and symbols as they are spoken (A T P, C O two), and avoid packing several hard terms into one line.")
+
+
 @weave.op
 def run_faithful(source: str, run_name: str, url: str = "", max_text_passes: int = 4, max_render_passes: int = 3,
                  fit_target: float = 0.9, faithful_target: float = 0.85, intelligibility_target: float = 0.9,
-                 line_target: float = 0.85, takes: int = 1, playbook: list[str] | None = None,
-                 progress_path: str | None = None) -> dict:
+                 line_target: float = 0.85, takes: int = 3, bpm: int = FAITHFUL_BPM,
+                 playbook: list[str] | None = None, progress_path: str | None = None) -> dict:
     history = []
     started = time.time()
     source = faithful.clean_source(source)
@@ -448,11 +464,12 @@ def run_faithful(source: str, run_name: str, url: str = "", max_text_passes: int
         raise ValueError(f"Paragraph needs ~{needed} syllables; the melody holds {melody.capacity(profile)}. Use a shorter paragraph.")
     chosen = melody.plan_song(profile, needed)
     sections = [{"name": s.name, "phrases": s.phrases} for s in chosen]
-    abc_file = str(melody.write_abc(profile, chosen, pipeline.HACK / f"runs/{run_name}/melody.abc"))
+    abc_file = str(melody.write_abc(profile, chosen, pipeline.HACK / f"runs/{run_name}/melody.abc", bpm))
+    style = re.sub(r"\d+ BPM", f"{bpm} BPM, unhurried phrasing, every word clearly enunciated", STYLE)
     ranges = melody.source_ranges(chosen)
     title = source.split(".")[0][:80]
     log({"step": "facts", "mode": "faithful", "topic": title, "facts": [], "url": url, "source": source,
-         "sections": sections, "syllables_needed": needed, "writer": WRITER, "playbook": playbook or []})
+         "sections": sections, "syllables_needed": needed, "bpm": bpm, "writer": WRITER, "playbook": playbook or []})
 
     lyrics, feedback, best, listen_notes, locked = None, None, None, "", {}
     result = None
@@ -476,7 +493,8 @@ def run_faithful(source: str, run_name: str, url: str = "", max_text_passes: int
             feedback = "\n".join(filter(None, [_faithful_feedback(result), listen_notes]))
         result, lyrics = draft, draft["lyrics"]
 
-        heard = render_pass(lyrics, str(pipeline.HACK / f"runs/{run_name}/render-{r + 1}"), takes, abc_file, ranges)
+        heard = render_pass(lyrics, str(pipeline.HACK / f"runs/{run_name}/render-{r + 1}"), takes, abc_file, ranges,
+                            seed_offset=100 * r, style=style)
         log({"step": "render", "render_pass": r + 1, "lyrics": lyrics, "audio": heard["audio"],
              "intelligibility": heard["intelligibility"], "melody_fidelity": heard["melody_fidelity"],
              "syllable_fit": result["syllable_fit"], "faithfulness": result["faithfulness"],
@@ -491,7 +509,7 @@ def run_faithful(source: str, run_name: str, url: str = "", max_text_passes: int
         worst_line = min(l["score"] for l in heard["lines"])
         if heard["intelligibility"] >= intelligibility_target and worst_line >= line_target:
             break
-        listen_notes = feedback = _listen_feedback(heard, line_target)
+        listen_notes = feedback = _faithful_listen_feedback(heard, line_target)
         locked = {i: l["line"] for i, l in enumerate(heard["lines"]) if l["score"] >= line_target}
 
     final = faithful.score(source, pipeline.lyric_lines(best["lyrics"]))
