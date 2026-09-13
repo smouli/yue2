@@ -53,25 +53,44 @@ def client() -> openai.OpenAI:
     return _client
 
 
+def _parse_json(text: str) -> dict | None:
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
+    body = fenced.group(1) if fenced else text
+    match = re.search(r"\{.*\}", body, re.S)
+    if not match:
+        return None
+    for candidate in (match.group(0), re.sub(r",\s*([\]}])", r"\1", match.group(0))):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
 def _chat_json(model: str, system: str, user: str, max_tokens: int = 2000, temperature: float = 0.7) -> dict:
     extra = {}
     if model in REASONING_MODELS:
         max_tokens = max(max_tokens, 16000)
         if model.startswith("openai/gpt-oss"):
             extra["reasoning_effort"] = "low"
+    else:
+        # Strict JSON mode: Gemma otherwise sometimes wraps invalid JSON in a code fence.
+        extra["response_format"] = {"type": "json_object"}
     problem = ""
-    for _attempt in range(3):  # models occasionally truncate or wrap their JSON; retry before failing the run
-        response = client().chat.completions.create(
-            model=model, max_tokens=max_tokens, temperature=temperature,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], **extra,
-        )
-        text = response.choices[0].message.content or ""
-        match = re.search(r"\{.*\}", text, re.S)
+    for _attempt in range(3):  # retry truncated or malformed JSON before failing the run
         try:
-            if match:
-                return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
+            response = client().chat.completions.create(
+                model=model, max_tokens=max_tokens, temperature=temperature,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], **extra,
+            )
+        except openai.BadRequestError:
+            if extra.pop("response_format", None) is None:
+                raise
+            continue  # model doesn't support JSON mode; retry without it
+        text = response.choices[0].message.content or ""
+        parsed = _parse_json(text)
+        if parsed is not None:
+            return parsed
         problem = f"finish_reason={response.choices[0].finish_reason}: {text[:300]}"
     raise ValueError(f"{model} returned no valid JSON ({problem})")
 
@@ -108,7 +127,7 @@ def _lyrics_text(lines: list[str]) -> str:
 @weave.op
 def write_lyrics(facts: dict, feedback: str | None = None, previous: str | None = None,
                  playbook: list[str] | None = None, locked: dict[int, str] | None = None,
-                 model: str | None = None) -> str:
+                 model: str | None = None, temperature: float = 0.7) -> str:
     budget = pipeline.PHRASE_BUDGET
     spec = "\n".join(f"line {i + 1}: exactly {n} syllables" for i, n in enumerate(budget))
     user = f"""Topic: {facts['topic']}
@@ -132,7 +151,8 @@ Write normal whole words. Never split a word into syllables with spaces or hyphe
         user += "\nThese lines were sung clearly and are locked; return them exactly as written:\n" + \
                 "\n".join(f"line {i + 1}: {text}" for i, text in sorted(locked.items()))
     user += '\nReturn JSON: {"lines": [7 strings]}'
-    lines = _chat_json(model or WRITER, "You are a songwriter who writes precise, singable educational lyrics.", user)["lines"]
+    lines = _chat_json(model or WRITER, "You are a songwriter who writes precise, singable educational lyrics.", user,
+                       temperature=temperature)["lines"]
     lines = [str(line).strip() for line in lines]
     for i, text in (locked or {}).items():  # enforce locks even if the writer ignored them
         if i < len(lines):

@@ -1,14 +1,17 @@
 """The playbook: general songwriting rules the loop learns from its own runs.
 
-After each song, the coach reads what went wrong and which fixes worked, then updates a short list of
-rules. The writer sees those rules on every future song. Each version is saved to disk and published
-to Weave so the playbook's history is tracked alongside the runs that produced it.
+After each song, the coach reads what went wrong and which fixes worked, then proposes rules. A rule only
+joins the playbook if it wins an A/B test: first drafts for a fixed set of validation pages, written with
+and without the rule, scored on syllable fit, facts taught and naturalness. The writer sees accepted rules
+on every future song. Each version is saved to disk and published to Weave, including rejected proposals.
 """
 
 import json
+import statistics
 from pathlib import Path
 
 import weave
+from weave.trace.util import ContextAwareThreadPoolExecutor
 
 import loop
 import pipeline
@@ -98,4 +101,114 @@ Return JSON: {{"rules": [{{"rule": str, "evidence": short str}}], "changes": one
         "rules": update["rules"][:MAX_RULES],
         "changes": update.get("changes", ""),
         "learned_from": playbook["learned_from"] + [run_evidence["topic"]],
+    }
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Gated learning: rules must earn their place.
+# ---------------------------------------------------------------------------------------------------------
+
+GATE_DATASET_PATH = pipeline.HACK / "runs/gate-dataset.json"
+GATE_URLS = [f"https://en.wikipedia.org/wiki/{page}" for page in (
+    "Moon", "Ancient_Egypt", "Electric_battery", "Rainforest", "Heart", "World_War_I", "Periodic_table", "Honey_bee")]
+GATE_TRIALS = 5  # identical runs differ by ~0.02 at 3 trials; 5 trials and a 0.03 bar keep noise out
+MIN_GAIN = 0.03        # a new rule must raise the mean first-draft score by this much
+MAX_FIT_DROP = 0.03    # ...without costing more than this much syllable fit
+MAX_CANDIDATES = 3
+
+
+def gate_dataset() -> list[dict]:
+    if GATE_DATASET_PATH.exists():
+        return json.loads(GATE_DATASET_PATH.read_text())
+    rows = []
+    for url in GATE_URLS:
+        facts = loop.extract_facts(loop.fetch_source(url))
+        rows.append({"url": url, "topic": facts["topic"], "facts": facts["facts"], "quiz": facts["quiz"]})
+    GATE_DATASET_PATH.write_text(json.dumps(rows, indent=2))
+    return rows
+
+
+def _draft_scores(rules: list[str], row: dict) -> dict | None:
+    facts = {"topic": row["topic"], "facts": row["facts"], "quiz": row["quiz"]}
+    try:
+        lyrics = loop.write_lyrics(facts, playbook=rules or None)
+        fit = pipeline.syllable_fit(lyrics)["syllable_fit"]
+        covered = loop.fact_coverage(lyrics, facts)["fact_coverage"]
+        natural = loop.naturalness(lyrics)["natural"]
+    except Exception:
+        return None
+    return {"fit": fit, "facts": covered, "natural": natural, "score": fit * covered * (0.5 + 0.5 * natural)}
+
+
+@weave.op
+def first_draft_eval(rules: list[str], rows: list[dict], trials: int = GATE_TRIALS) -> dict:
+    """Mean first-draft quality over validation pages when the writer follows `rules`."""
+    tasks = [row for row in rows for _ in range(trials)]
+    with ContextAwareThreadPoolExecutor(max_workers=8) as pool:
+        results = [r for r in pool.map(lambda row: _draft_scores(rules, row), tasks) if r]
+    mean = lambda key: round(statistics.mean(r[key] for r in results), 3) if results else 0.0
+    return {"score": mean("score"), "fit": mean("fit"), "facts": mean("facts"), "natural": mean("natural"),
+            "drafts": len(results)}
+
+
+@weave.op
+def propose(playbook: dict, run_evidence: dict) -> dict:
+    """Coach step: suggest new rules (and rules to drop) from one run. Nothing is adopted here."""
+    final = run_evidence["final"] or {}
+    compact = {**run_evidence, "final": {k: final.get(k) for k in ("intelligibility", "fact_coverage", "syllable_fit", "natural", "lyrics")}}
+    return loop._chat_json(loop.ANALYST,
+        "You coach an AI that writes educational song lyrics to a fixed melody (one syllable per note, strict "
+        "per-line syllable budgets). A music model sings the lyrics and a speech recognizer checks each line. "
+        "Rules must be general across topics, actionable, under 25 words, and must not trade away syllable fit.",
+        f"""Current playbook:
+{json.dumps(rules(playbook), indent=1)}
+
+Evidence from the latest song:
+{json.dumps(compact, indent=1)}
+
+Propose at most {MAX_CANDIDATES} new rules that would have prevented a failure here, most promising first, and
+list any current rules the evidence contradicts. Each proposal will be A/B tested before it is adopted.
+Return JSON: {{"candidates": [{{"rule": str, "evidence": short str}}], "remove": [exact rule text]}}""",
+        max_tokens=2000, temperature=0.2)
+
+
+@weave.op
+def learn(playbook: dict, run_evidence: dict) -> dict:
+    """Propose rules from a run, A/B test each on first drafts, and keep only the ones that help."""
+    rows = gate_dataset()
+    proposal = propose(playbook, run_evidence)
+    current_rules = rules(playbook)
+    current = first_draft_eval(current_rules, rows)
+    decisions = []
+
+    for candidate in proposal.get("candidates", [])[:MAX_CANDIDATES]:
+        trial = first_draft_eval(current_rules + [candidate["rule"]], rows)
+        gain = round(trial["score"] - current["score"], 3)
+        accepted = gain >= MIN_GAIN and trial["fit"] >= current["fit"] - MAX_FIT_DROP
+        decisions.append({"action": "add", "rule": candidate["rule"], "evidence": candidate.get("evidence", ""),
+                          "accepted": accepted, "gain": gain, "before": current, "after": trial})
+        if accepted:
+            current_rules, current = current_rules + [candidate["rule"]], trial
+
+    for rule in proposal.get("remove", []):
+        if rule not in current_rules:
+            continue
+        trial = first_draft_eval([r for r in current_rules if r != rule], rows)
+        change = round(trial["score"] - current["score"], 3)
+        accepted = change >= -0.005  # dropping a rule is fine if quality holds
+        decisions.append({"action": "remove", "rule": rule, "accepted": accepted, "gain": change,
+                          "before": current, "after": trial})
+        if accepted:
+            current_rules, current = [r for r in current_rules if r != rule], trial
+
+    evidence_for = {r["rule"]: r.get("evidence", "") for r in playbook["rules"]}
+    evidence_for.update({d["rule"]: d.get("evidence", "") for d in decisions if d["action"] == "add"})
+    kept = sum(d["accepted"] for d in decisions)
+    return {
+        "version": playbook["version"] + 1,
+        "rules": [{"rule": r, "evidence": evidence_for.get(r, "")} for r in current_rules][:MAX_RULES],
+        "changes": f"{kept} of {len(decisions)} proposals accepted; first-draft score {current['score']}",
+        "learned_from": playbook["learned_from"] + [run_evidence["topic"]],
+        "decisions": playbook.get("decisions", []) + [{"topic": run_evidence["topic"], "decisions": decisions}],
+        "score": current,
     }

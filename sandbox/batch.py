@@ -67,7 +67,7 @@ def main():
         row = {"url": url, "run": run_name, "playbook_version": 0 if mode == "baseline" else book["version"],
                "rules_used": len(used), **metrics(result["history"])}
         if mode == "learn":
-            book = pb.coach(book, pb.evidence(result["history"]))
+            book = pb.learn(book, pb.evidence(result["history"]))
             pb.save(book)
             row["playbook_version_after"] = book["version"]
             row["playbook_changes"] = book.get("changes", "")

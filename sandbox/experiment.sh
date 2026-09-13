@@ -6,7 +6,7 @@ W=https://en.wikipedia.org/wiki
 TEST="$W/Immune_system $W/Solar_System $W/Industrial_Revolution $W/Earthquake"
 TRAIN="$W/Mitochondrion $W/Plate_tectonics $W/Water_cycle $W/Roman_Empire $W/DNA $W/Volcano"
 PY=${PY:-python}
-$PY batch.py baseline test-baseline 3 $TEST && \
-$PY batch.py learn train 3 $TRAIN && \
-$PY batch.py frozen test-playbook 3 $TEST
+[ "$SKIP_BASELINE" = 1 ] || $PY batch.py baseline test-baseline 3 $TEST; \
+$PY batch.py learn train-gated 3 $TRAIN && \
+$PY batch.py frozen test-gated 3 $TEST
 echo EXPERIMENT_DONE
