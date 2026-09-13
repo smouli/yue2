@@ -1,0 +1,168 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1420" height="760" viewBox="0 0 1420 760" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8c94a0"/>
+    </marker>
+    <marker id="arrow-yellow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f5b82e"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3aa6f5"/>
+    </marker>
+    <style>
+      .box { fill: #161b24; stroke: #2a3140; stroke-width: 1.5; }
+      .model { fill: #131a26; stroke: #3aa6f5; stroke-width: 1.5; }
+      .score { fill: #10201a; stroke: #2fb36d; stroke-width: 2; }
+      .guard { fill: #161b24; stroke: #5a6272; stroke-width: 1.5; stroke-dasharray: 5 4; }
+      .t { fill: #eceef2; font-size: 15px; font-weight: 600; }
+      .s { fill: #8c94a0; font-size: 12.5px; }
+      .score-t { fill: #6fe0a6; font-size: 15px; font-weight: 700; letter-spacing: 0.4px; }
+      .lane { fill: #eceef2; font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+      .lane-s { fill: #8c94a0; font-size: 12px; }
+      .flow { stroke: #8c94a0; stroke-width: 1.6; fill: none; }
+      .note { fill: #8c94a0; font-size: 12px; font-style: italic; }
+    </style>
+  </defs>
+
+  <rect width="1420" height="760" fill="#0e1117"/>
+
+  <text x="60" y="62" fill="#eceef2" font-size="30" font-weight="700">How each score is computed</text>
+  <text x="60" y="92" fill="#8c94a0" font-size="16">Syllable fit is checked on the text before anything is sung; clarity and melody are checked on the sung audio.</text>
+
+  <!-- lane backgrounds -->
+  <rect x="40" y="120" width="1340" height="104" rx="16" fill="#12161e"/>
+  <rect x="40" y="252" width="1340" height="104" rx="16" fill="#12161e"/>
+  <rect x="40" y="384" width="1340" height="236" rx="16" fill="#12161e"/>
+
+  <!-- lane labels -->
+  <text class="lane" x="60" y="166">ONCE PER SONG</text>
+  <text class="lane-s" x="60" y="186">melody setup</text>
+  <text class="lane" x="60" y="298">EVERY DRAFT</text>
+  <text class="lane-s" x="60" y="318">text · seconds · no GPU</text>
+  <text class="lane" x="60" y="430">EVERY TAKE</text>
+  <text class="lane-s" x="60" y="450">audio · minutes · GPU</text>
+
+  <!-- ROW 1: melody setup -->
+  <g>
+    <rect class="box" x="230" y="132" width="190" height="80" rx="12"/>
+    <text class="t" x="248" y="166">Original song</text>
+    <text class="s" x="248" y="188">Island in the Sun, 115 BPM</text>
+
+    <rect class="model" x="464" y="132" width="190" height="80" rx="12"/>
+    <text class="t" x="482" y="166">SheetSage2</text>
+    <text class="s" x="482" y="188">transcribes vocal melody</text>
+
+    <rect class="box" x="698" y="132" width="190" height="80" rx="12"/>
+    <text class="t" x="716" y="166">Melody notes</text>
+    <text class="s" x="716" y="188">timed, per section</text>
+
+    <rect class="box" x="932" y="132" width="190" height="80" rx="12"/>
+    <text class="t" x="950" y="166">Phrases</text>
+    <text class="s" x="950" y="188">split at pauses &gt; 0.35 s</text>
+
+    <rect class="box" x="1166" y="132" width="190" height="80" rx="12" style="stroke:#f5b82e"/>
+    <text class="t" x="1184" y="166">Syllable budget</text>
+    <text class="s" x="1184" y="188">7 · 7 · 7 · 7  |  7 · 8 · 13 …</text>
+
+    <path class="flow" d="M420,172 H460" marker-end="url(#arrow)"/>
+    <path class="flow" d="M654,172 H694" marker-end="url(#arrow)"/>
+    <path class="flow" d="M888,172 H928" marker-end="url(#arrow)"/>
+    <path class="flow" d="M1122,172 H1162" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- ROW 2: text pass -->
+  <g>
+    <rect class="box" x="230" y="264" width="190" height="80" rx="12" style="stroke:#f5b82e"/>
+    <text class="t" x="248" y="298">Lyrics draft</text>
+    <text class="s" x="248" y="320">written by Gemma 4 31B</text>
+
+    <rect class="box" x="464" y="264" width="190" height="80" rx="12"/>
+    <text class="t" x="482" y="298">CMU dictionary</text>
+    <text class="s" x="482" y="320">pronunciation lookup</text>
+
+    <rect class="box" x="698" y="264" width="190" height="80" rx="12"/>
+    <text class="t" x="716" y="298">Syllables per line</text>
+    <text class="s" x="716" y="320">numbers spelled out</text>
+
+    <rect class="box" x="932" y="264" width="190" height="80" rx="12"/>
+    <text class="t" x="950" y="298">Compare per line</text>
+    <text class="s" x="950" y="320">vs. budget, ±1 syllable</text>
+
+    <rect class="score" x="1166" y="264" width="190" height="80" rx="12"/>
+    <text class="score-t" x="1184" y="298">SYLLABLE FIT</text>
+    <text class="s" x="1184" y="320">target ≥ 90%</text>
+
+    <path class="flow" d="M420,304 H460" marker-end="url(#arrow)"/>
+    <path class="flow" d="M654,304 H694" marker-end="url(#arrow)"/>
+    <path class="flow" d="M888,304 H928" marker-end="url(#arrow)"/>
+    <path class="flow" d="M1122,304 H1162" marker-end="url(#arrow)"/>
+
+    <!-- budget feeds the comparison -->
+    <path d="M1261,212 V238 H1027 V260" stroke="#f5b82e" stroke-width="1.6" fill="none" marker-end="url(#arrow-yellow)"/>
+    <text class="note" x="1060" y="232">budget</text>
+  </g>
+
+  <!-- ROW 3: sung audio → clarity -->
+  <g>
+    <path d="M325,344 V392" stroke="#3aa6f5" stroke-width="1.6" fill="none" marker-end="url(#arrow-blue)"/>
+    <text class="note" x="334" y="372">best draft</text>
+
+    <rect class="model" x="230" y="396" width="190" height="80" rx="12"/>
+    <text class="t" x="248" y="430">YuE2 sings</text>
+    <text class="s" x="248" y="452">3 takes, marimo molab GPU</text>
+
+    <rect class="box" x="464" y="396" width="190" height="80" rx="12"/>
+    <text class="t" x="482" y="430">Sung audio</text>
+    <text class="s" x="482" y="452">one file per take</text>
+
+    <rect class="model" x="698" y="396" width="190" height="80" rx="12"/>
+    <text class="t" x="716" y="430">Whisper</text>
+    <text class="s" x="716" y="452">heard words + timings</text>
+
+    <rect class="box" x="932" y="396" width="190" height="80" rx="12"/>
+    <text class="t" x="950" y="430">vs. intended lyrics</text>
+    <text class="s" x="950" y="452">letter by letter, per line</text>
+
+    <rect class="score" x="1166" y="396" width="190" height="80" rx="12"/>
+    <text class="score-t" x="1184" y="430">HEARD CLEARLY</text>
+    <text class="s" x="1184" y="452">song ≥ 90%, line ≥ 85%</text>
+
+    <path class="flow" d="M420,436 H460" marker-end="url(#arrow)"/>
+    <path class="flow" d="M654,436 H694" marker-end="url(#arrow)"/>
+    <path class="flow" d="M888,436 H928" marker-end="url(#arrow)"/>
+    <path class="flow" d="M1122,436 H1162" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- ROW 4: sung audio → melody guardrail -->
+  <g>
+    <path class="flow" d="M559,476 V524" marker-end="url(#arrow)"/>
+
+    <rect class="model" x="464" y="528" width="190" height="80" rx="12"/>
+    <text class="t" x="482" y="562">SheetSage2</text>
+    <text class="s" x="482" y="584">transcribes sung melody</text>
+
+    <rect class="box" x="698" y="528" width="190" height="80" rx="12"/>
+    <text class="t" x="716" y="562">Sung notes</text>
+    <text class="s" x="716" y="584">pitch sequence</text>
+
+    <rect class="box" x="932" y="528" width="190" height="80" rx="12"/>
+    <text class="t" x="950" y="562">vs. original melody</text>
+    <text class="s" x="950" y="584">notes from setup</text>
+
+    <rect class="guard" x="1166" y="528" width="190" height="80" rx="12"/>
+    <text class="t" x="1184" y="562" style="fill:#b7bdc8">MELODY CHECK</text>
+    <text class="s" x="1184" y="584">guardrail, report only</text>
+
+    <path class="flow" d="M654,568 H694" marker-end="url(#arrow)"/>
+    <path class="flow" d="M888,568 H928" marker-end="url(#arrow)"/>
+    <path class="flow" d="M1122,568 H1162" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- feedback loop -->
+  <path d="M1356,304 H1392 V690 H206 V304 H226" stroke="#f5b82e" stroke-width="2" stroke-dasharray="7 5" fill="none" marker-end="url(#arrow-yellow)"/>
+  <path d="M1356,436 H1392" stroke="#f5b82e" stroke-width="2" stroke-dasharray="7 5" fill="none"/>
+  <rect x="520" y="672" width="440" height="36" rx="18" fill="#0e1117"/>
+  <text x="740" y="695" fill="#f5b82e" font-size="14" font-weight="600" text-anchor="middle">rewrite off-budget or misheard lines · clear lines stay locked</text>
+
+  <text x="60" y="738" fill="#5a6272" font-size="12">Blue outline: model.  Green: score the loop acts on.  Dashed grey: guardrail.  Yellow: budget and feedback.</text>
+</svg>

@@ -35,6 +35,8 @@ Two modes share the engine:
 
 ## Scoring rubric
 
+![How each score is computed](docs/scoring-pipeline.svg)
+
 ![Scoring rubric](docs/rubric.png)
 
 | Score | How it's measured | Target | What the loop does with it |
@@ -97,6 +99,7 @@ lyrics alone, then graded) and naturalness (a judge).
 | `tools/final_cut.py` | assembles the final video with the facecam recording, placed by word timestamps |
 | `docs/demo-script.md` | voiceover script and rubric reference |
 | `docs/rubric.png` | the rubric as an image |
+| `docs/scoring-pipeline.svg` | diagram of how each score is computed |
 | `sandbox/setup.sh`, `setup_asr.sh`, `transcribe.sh` | sandbox installs and source-track transcription |
 
 ## Setup
