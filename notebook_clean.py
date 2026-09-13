@@ -1,12 +1,5 @@
 # /// script
 # requires-python = ">=3.13"
-# dependencies = [
-#     "anywidget==0.11.0",
-#     "openai==3.13.0",
-#     "pronouncing==0.3.0",
-#     "trafilatura==2.2.0",
-#     "weave==0.53.9",
-# ]
 # ///
 
 import marimo
@@ -134,7 +127,7 @@ def demo_paragraphs(FAITHFUL, demo_faithful, demo_mode, demo_url, mo):
             import trafilatura
             _text = trafilatura.extract(trafilatura.fetch_url(url) or "") or ""
             return [demo_faithful.clean_source(_p) for _p in _text.splitlines() if 35 <= len(_p.split()) <= 110]
-        except:
+        except Exception:
             return []
 
     _paras = _page_paragraphs(demo_url.value) if demo_mode.value == FAITHFUL and demo_url.value.strip() else []
