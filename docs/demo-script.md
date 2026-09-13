@@ -1,6 +1,6 @@
 # Demo video voiceover script
 
-Timed to `results/yue2-demo.mp4` (2:08). Read at a relaxed pace; the timings leave room. Stay silent where it
+Timed to `results/yue2-demo-v4.mp4` (2:38), which is v3 with the 30-second "Under the hood" block spliced in. Read at a relaxed pace; the timings leave room. Stay silent where it
 says **(pause)** so the audio clips and the song carry those moments.
 
 ## How to record
@@ -40,5 +40,12 @@ A second take is fine; small timing drift is corrected when compositing.
 **1:50 – 2:02 · How it learns**
 > Across songs, it proposes its own rules. Each one has to win an A/B test on forty drafts from pages it hasn't seen. Only three of eighteen made the cut.
 
-**2:02 – 2:08 · Close**
-> Everything is traced in Weave and runs on a marimo molab GPU. Thanks for watching.
+**2:02 – 2:32 · Under the hood** (your face fills the big circle; the cards appear at 2:03, 2:11 and 2:19)
+> Here's how we score it. Every line gets checked three ways: Whisper tells us whether it was heard clearly, we measure how much of the source's own wording survived in order, and we match syllables to the melody's notes.
+>
+> So far the loop has written 225 lyric drafts and sung 184 takes, and we scored about 960 more drafts while testing rules. Every one of them is traced in Weave.
+>
+> Next, we'll fine-tune a small writer on the best of those lyrics and serve it on W&B Inference, so first drafts start close to finished.
+
+**2:32 – 2:38 · Close**
+> Everything runs on a marimo molab GPU. Thanks for watching.
