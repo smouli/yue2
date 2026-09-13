@@ -164,8 +164,8 @@ def demo_launch(
             _secrets_file = Path.home() / ".yue2/.secrets.env"
             if _secrets_file.exists():
                 for _line in _secrets_file.read_text().splitlines():
-                _k, _, _v = _line.partition("=")
-                os.environ[_k] = _v
+                    _k, _, _v = _line.partition("=")
+                    os.environ[_k] = _v
         _slug = re.sub(r"[^a-z0-9]+", "-", demo_url.value.rstrip("/").rsplit("/", 1)[-1].lower()).strip("-")[:30] or "page"
         _log_dir = Path.home() / ".yue2/logs"
         _log_dir.mkdir(parents=True, exist_ok=True)
@@ -362,7 +362,7 @@ def control_test(Path, json, mo, subprocess):
 
 @app.cell
 def run_picker_cell(Path, mo):
-    _runs = sorted(p.name.removesuffix(".progress.json") for p in Path("/home/marimo/hack/runs").glob("*.progress.json"))
+    _runs = sorted(p.name.removesuffix(".progress.json") for p in (Path.home() / ".yue2/runs").glob("*.progress.json"))
     run_picker = mo.ui.dropdown(options=_runs, value=_runs[-1] if _runs else None, label="Loop run")
     run_picker
     return (run_picker,)
@@ -370,7 +370,7 @@ def run_picker_cell(Path, mo):
 
 @app.cell
 def loop_run_viewer(Path, json, mo, run_picker, subprocess):
-    _events = json.loads((Path("/home/marimo/hack/runs") / f"{run_picker.value}.progress.json").read_text())
+    _events = json.loads(((Path.home() / ".yue2/runs") / f"{run_picker.value}.progress.json").read_text())
     _facts = next(e for e in _events if e["step"] == "facts")
     _renders = [e for e in _events if e["step"] == "render"]
     _texts = [e for e in _events if e["step"] == "text"]
