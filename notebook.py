@@ -161,11 +161,15 @@ def demo_launch(
 ):
     if demo_go.value:
         if "WANDB_API_KEY" not in os.environ:
-            for _line in Path("/home/marimo/hack/.secrets.env").read_text().splitlines():
+            _secrets_file = Path.home() / ".yue2/.secrets.env"
+            if _secrets_file.exists():
+                for _line in _secrets_file.read_text().splitlines():
                 _k, _, _v = _line.partition("=")
                 os.environ[_k] = _v
         _slug = re.sub(r"[^a-z0-9]+", "-", demo_url.value.rstrip("/").rsplit("/", 1)[-1].lower()).strip("-")[:30] or "page"
-        _log = "/home/marimo/hack/logs/loop-{run}.log"
+        _log_dir = Path.home() / ".yue2/logs"
+        _log_dir.mkdir(parents=True, exist_ok=True)
+        _log = str(_log_dir / "loop-{run}.log")
         if demo_mode.value == FAITHFUL:
             _run = f"sing-{_slug}-{time.strftime('%H%M%S')}"
             _paragraph = demo_text.value.strip() or demo_paragraph.value or ""
@@ -198,7 +202,7 @@ def demo_progress(
     mo.stop(_run is None, mo.md("_Press **Make the song** to start, or replay a finished run._"))
 
     _events_path = DEMO_RUNS / f"{_run}.progress.json"
-    _log = Path(f"/home/marimo/hack/logs/loop-{_run}.log")
+    _log = Path.home() / ".yue2/logs" / f"loop-{_run}.log"
     _events = json.loads(_events_path.read_text()) if _events_path.exists() else []
     _log_text = _log.read_text() if _log.exists() else ""
     _failed = "Traceback" in _log_text
@@ -289,7 +293,7 @@ def demo_player(
 
 @app.cell
 def smoke_test(Path, mo, subprocess):
-    _run = Path("/home/marimo/hack/runs/smoke-city-lights")
+    _run = Path.home() / ".yue2/runs/smoke-city-lights"
     _mp3 = _run / "audio.mp3"
     if not _mp3.exists():
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(_run / "audio.flac"), "-b:a", "192k", str(_mp3)], check=True)
@@ -305,7 +309,7 @@ def smoke_test(Path, mo, subprocess):
 
 @app.cell
 def cover_test_v1(Path, json, mo, subprocess):
-    _hack = Path("/home/marimo/hack")
+    _hack = Path.home() / ".yue2"
     _orig = _hack / "runs/island-original-v1c1.mp3"
     _cover = _hack / "runs/cover-v1/audio.mp3"
     if not _orig.exists():
@@ -328,7 +332,7 @@ def cover_test_v1(Path, json, mo, subprocess):
 
 @app.cell
 def control_test(Path, json, mo, subprocess):
-    _hack = Path("/home/marimo/hack")
+    _hack = Path.home() / ".yue2"
     _control = json.loads((_hack / "runs/control_results.json").read_text())
     _v1_asr = json.loads((_hack / "runs/cover-v1/asr.json").read_text())
     _rows = [
