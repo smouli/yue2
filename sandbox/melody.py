@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pipeline
 
-TRANSCRIPTION = pipeline.HACK / "runs/island-melody-vocal"
+# Use local melody files if they exist, otherwise fall back to HACK
+_local_melody = Path(__file__).parent / "runs" / "island-melody-vocal"
+TRANSCRIPTION = _local_melody if _local_melody.exists() else pipeline.HACK / "runs/island-melody-vocal"
 PHRASE_GAP_SECONDS = 0.35
 SINGABLE = ("verse", "chorus")
 

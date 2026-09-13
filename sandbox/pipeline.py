@@ -11,17 +11,19 @@ import subprocess
 import time
 from pathlib import Path
 
-HACK = Path("/home/marimo/hack")
-SKILL = HACK / "YuE/skills/yue2-music"
-SOURCE_LAB = HACK / "runs/island-melody-vocal/melody_vocal.lab"
-SOURCE_SECTION = (17.9, 59.8)  # verse 1 + chorus 1 in the source recording
-SOURCE_ABC = HACK / "edits/island_v1c1.abc"
+# Use local directory for outputs
+HACK = Path(__file__).parent.parent / ".yue2"
+HACK.mkdir(parents=True, exist_ok=True)
+SKILL = Path(__file__).parent  # Local sandbox directory
+SOURCE_LAB = Path(__file__).parent / "runs/island-melody-vocal/melody_vocal.lab"
+SOURCE_SECTION = (0, 200)  # Use full melody
+SOURCE_ABC = Path(__file__).parent / "runs/island-melody-vocal/score.abc"
 PHRASE_BUDGET = [7, 7, 7, 7, 7, 8, 13]  # vocal notes per phrase: verse 1 (4 lines), chorus 1 (3 lines)
 
 
 def _env() -> dict:
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONSAFEPATH")}
-    env["HF_HOME"] = str(HACK / "hf-cache")
+    env["HF_HOME"] = str(Path.home() / ".yue2/hf-cache")
     return env
 
 

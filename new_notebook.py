@@ -11,7 +11,7 @@
 
 import marimo
 
-__generated_with = "0.24.2"
+__generated_with = "0.24.0"
 app = marimo.App(width="medium", auto_download=["html"])
 
 
@@ -28,40 +28,21 @@ def _():
 
     import marimo as mo
 
-    return Path, json, mo, subprocess, sys
+    return Path, json, mo, os, re, shlex, subprocess, sys, time
 
 
 @app.cell(hide_code=True)
-def demo_controls():
-    import sys
-    import json
-    from pathlib import Path
-    import marimo as mo
-
-    DEMO_CODE = str(Path.home() / ".yue2")
-    DEMO_RUNS = Path.home() / ".yue2/runs"
-    DEMO_RUNS.mkdir(parents=True, exist_ok=True)
-
+def demo_controls(Path, json, mo, sys):
+    DEMO_CODE = "/home/marimo/hack/branches/faithful"
+    DEMO_RUNS = Path("/home/marimo/hack/runs")
     FAITHFUL = "Sing the text"
     SUMMARY = "Teach the key facts"
-
-    # Try to load local modules, fallback to stubs
-    try:
-        if DEMO_CODE not in sys.path:
-            sys.path.insert(0, DEMO_CODE)
-        for _module in ("singalong", "faithful"):
-            sys.modules.pop(_module, None)
-        import singalong
-        import faithful as demo_faithful
-    except ImportError:
-        class demo_faithful:
-            @staticmethod
-            def clean_source(text):
-                return text.strip()
-        class singalong:
-            @staticmethod
-            def from_result(*args, **kwargs):
-                pass
+    if DEMO_CODE not in sys.path:
+        sys.path.insert(0, DEMO_CODE)
+    for _module in ("singalong", "faithful"):
+        sys.modules.pop(_module, None)  # pick up this branch's versions
+    import singalong
+    import faithful as demo_faithful
 
     get_demo_run, set_demo_run = mo.state(None)
     get_demo_done, set_demo_done = mo.state(None)
@@ -78,10 +59,6 @@ def demo_controls():
     demo_mode = mo.ui.radio(options=[FAITHFUL, SUMMARY], value=FAITHFUL, inline=True)
     demo_url = mo.ui.text(value="https://en.wikipedia.org/wiki/Industrial_Revolution",
                           placeholder="Paste a Wikipedia or textbook URL", full_width=True)
-
-    demo_song = mo.ui.text(value="Island in the Sun",
-                          placeholder="Enter the song name/melody to use", full_width=True)
-
     demo_takes = mo.ui.slider(1, 4, value=3, show_value=True, label="Takes per render")
     demo_go = mo.ui.run_button(label="🎸 Make the song", kind="success")
     demo_refresh = mo.ui.refresh(options=["2s", "5s"], default_interval="2s")
@@ -89,32 +66,28 @@ def demo_controls():
                                on_change=lambda name: (set_demo_run(name), set_demo_done(name)))
 
     mo.vstack([
-        mo.md("# 🎧 Listen to what you read\nPaste a page. The agent sets its words to a song melody, sings them, listens back with Whisper, and rewrites whatever it can't hear clearly, keeping the text's own wording."),
+        mo.md("# 🎧 Listen to what you read\n"
+              "Paste a page. The agent sets its words to the melody of *Island in the Sun*, sings them, listens back "
+              "with Whisper, and rewrites whatever it can't hear clearly, keeping the text's own wording."),
         demo_mode,
         demo_url,
-        mo.md("**🎵 Song/Melody to set the text to:**"),
-        demo_song,
     ])
     return (
+        DEMO_CODE,
         DEMO_RUNS,
         FAITHFUL,
-        Path,
         demo_faithful,
         demo_go,
         demo_mode,
         demo_past,
         demo_refresh,
-        demo_song,
         demo_takes,
         demo_url,
         get_demo_done,
         get_demo_run,
-        json,
-        mo,
         set_demo_done,
         set_demo_run,
         singalong,
-        sys,
     )
 
 
@@ -151,58 +124,53 @@ def demo_paragraphs(
 
 @app.cell(hide_code=True)
 def demo_launch(
+    DEMO_CODE,
     DEMO_RUNS,
     FAITHFUL,
+    Path,
     demo_go,
     demo_mode,
     demo_paragraph,
-    demo_song,
     demo_takes,
     demo_text,
     demo_url,
     mo,
+    os,
+    re,
     set_demo_done,
     set_demo_run,
+    shlex,
+    subprocess,
     sys,
+    time,
 ):
-    import re, time, shlex, subprocess, os
-    from pathlib import Path
-
     if demo_go.value:
         if "WANDB_API_KEY" not in os.environ:
-            secrets_file = Path.home() / ".yue2/.secrets.env"
-            if secrets_file.exists():
-                for _line in secrets_file.read_text().splitlines():
-                    _k, _, _v = _line.partition("=")
-                    if _k.strip():
-                        os.environ[_k.strip()] = _v.strip()
-    
+            for _line in Path("/home/marimo/hack/.secrets.env").read_text().splitlines():
+                _k, _, _v = _line.partition("=")
+                os.environ[_k] = _v
         _slug = re.sub(r"[^a-z0-9]+", "-", demo_url.value.rstrip("/").rsplit("/", 1)[-1].lower()).strip("-")[:30] or "page"
-        _log_dir = Path.home() / ".yue2/logs"
-        _log_dir.mkdir(parents=True, exist_ok=True)
-        _log = str(_log_dir / "loop-{run}.log")
-    
+        _log = "/home/marimo/hack/logs/loop-{run}.log"
         if demo_mode.value == FAITHFUL:
             _run = f"sing-{_slug}-{time.strftime('%H%M%S')}"
             _paragraph = demo_text.value.strip() or demo_paragraph.value or ""
             mo.stop(not _paragraph, mo.md("**Pick a paragraph or paste one first.**"))
             _file = DEMO_RUNS / f"{_run}.txt"
             _file.write_text(_paragraph)
-            _cmd = f"run_faithful.py {_file} {_run} {demo_takes.value} {shlex.quote(demo_url.value)} --song {shlex.quote(demo_song.value)}"
+            _cmd = f"run_faithful.py {_file} {_run} {demo_takes.value} {shlex.quote(demo_url.value)}"
         else:
             _run = f"facts-{_slug}-{time.strftime('%H%M%S')}"
             _cmd = f"run_loop.py {shlex.quote(demo_url.value)} {_run} {demo_takes.value}"
-    
-        mo.status.toast(f"🎸 Starting: {_run}")
-        subprocess.Popen(f"cd {Path.home() / '.yue2'} && nohup {sys.executable} {_cmd} > {_log.format(run=_run)} 2>&1 &", shell=True)
+        subprocess.Popen(f"cd {DEMO_CODE} && nohup {sys.executable} {_cmd} > {_log.format(run=_run)} 2>&1 &", shell=True)
         set_demo_done(None)
         set_demo_run(_run)
-    return Path, subprocess
+    return
 
 
 @app.cell(hide_code=True)
 def demo_progress(
     DEMO_RUNS,
+    Path,
     demo_refresh,
     get_demo_done,
     get_demo_run,
@@ -210,15 +178,12 @@ def demo_progress(
     mo,
     set_demo_done,
 ):
-    from pathlib import Path
-
-    _log_dir = Path.home() / ".yue2/logs"
     demo_refresh.value
     _run = get_demo_run()
     mo.stop(_run is None, mo.md("_Press **Make the song** to start, or replay a finished run._"))
 
     _events_path = DEMO_RUNS / f"{_run}.progress.json"
-    _log = _log_dir / f"loop-{_run}.log"
+    _log = Path(f"/home/marimo/hack/logs/loop-{_run}.log")
     _events = json.loads(_events_path.read_text()) if _events_path.exists() else []
     _log_text = _log.read_text() if _log.exists() else ""
     _failed = "Traceback" in _log_text
@@ -244,26 +209,44 @@ def demo_progress(
         _t = _texts[-1]
         _status = (f"🎤 Singing render pass {_t['render_pass']} and listening back…"
                    if _t["syllable_fit"] >= 0.95 or _t["text_pass"] >= 4 else
-                   f"✍️ Fitting {'the text' if _is_faithful else 'lyrics'} to the melody: draft {_t['render_pass']}.{_t['text_pass']} ")
+                   f"✍️ Fitting {'the text' if _is_faithful else 'lyrics'} to the melody: draft {_t['render_pass']}.{_t['text_pass']} "
+                   f"(syllable fit {_t['syllable_fit']:.2f}, {_content_label.lower()} {_t['fact_coverage']:.2f})")
 
     def _bar(label, value, color):
         _pct = round(value * 100)
-        return f"<div style='display:grid;grid-template-columns:110px 1fr 44px;gap:8px'><span>{label}</span><div style='height:10px;border-radius:5px;background:color-mix(in srgb,currentColor 10%,transparent)'><div style='width:{_pct}%;height:100%;border-radius:5px;background:{color};transition:width .4s'></div></div><b>{_pct}%</b></div>"
+        return (f"<div style='display:grid;grid-template-columns:110px 1fr 44px;gap:8px;align-items:center;font-size:13px'>"
+                f"<span>{label}</span><div style='height:10px;border-radius:5px;background:color-mix(in srgb,currentColor 10%,transparent)'>"
+                f"<div style='width:{_pct}%;height:100%;border-radius:5px;background:{color};transition:width .4s'></div></div>"
+                f"<b>{_pct}%</b></div>")
 
     def _render_card(e):
         _takes = e.get("takes", [])
         _kept = max(_takes, key=lambda t: t["take_score"]) if _takes else None
-        _chips = "".join(f"<span style='padding:2px 8px;border-radius:10px;font-size:12px;background:{"color-mix(in srgb,#2fb36d 30%,transparent)" if t is _kept else "color-mix(in srgb,currentColor 8%,transparent)"}'>{i + 1}</span>" for i, t in enumerate(_takes))
+        _chips = "".join(
+            f"<span style='padding:2px 8px;border-radius:10px;font-size:12px;"
+            f"background:{'color-mix(in srgb,#2fb36d 30%,transparent)' if t is _kept else 'color-mix(in srgb,currentColor 8%,transparent)'}'>"
+            f"take {i + 1}: {t['intelligibility']:.2f}</span>" for i, t in enumerate(_takes))
         _weak = sum(1 for l in e["lines"] if l["score"] < 0.85)
-        return f"<div style='padding:10px;border-radius:10px;border:1px solid color-mix(in srgb,currentColor 15%,transparent);display:grid;gap:6px'><b>Render {e['render_pass']}</b>" + _bar("Heard", e["intelligibility"], "#2fb36d") + _bar(_content_label, e["fact_coverage"], "#3aa6f5") + _bar("Fit", e["syllable_fit"], "#f5b82e") + f"<div style='display:flex;gap:6px'>{_chips}</div></div>"
+        return (f"<div style='padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,currentColor 15%,transparent);display:grid;gap:6px'>"
+                f"<b>Render pass {e['render_pass']}</b>"
+                + _bar("Heard clearly", e["intelligibility"], "#2fb36d")
+                + _bar(_content_label, e["fact_coverage"], "#3aa6f5")
+                + _bar("Syllable fit", e["syllable_fit"], "#f5b82e")
+                + f"<div style='display:flex;gap:6px;flex-wrap:wrap'>{_chips}</div>"
+                + f"<span style='font-size:12px;opacity:.7'>{'all lines clear' if not _weak else f'{_weak} line(s) misheard → rewrite'}</span></div>")
 
+    _latest_lyrics = (_renders[-1] if _renders and (not _texts or _renders[-1]["t"] >= _texts[-1]["t"]) else (_texts[-1] if _texts else None))
     mo.vstack([
-        mo.hstack([mo.md(f"### {_facts['topic'] if _facts else _run}"), demo_refresh], justify="space-between"),
-        mo.md(f"**{_status}** · {len(_texts)} drafts · {len(_renders)} renders"),
+        mo.hstack([mo.md(f"### {_facts['topic'] if _facts else _run}"), demo_refresh], justify="space-between", align="center"),
+        mo.md(f"**{_status}** · {len(_texts)} lyric drafts · {len(_renders)} render passes"),
         mo.plain_text(_log_text[-1500:]) if _failed else mo.md(""),
-        mo.Html("<div>" + "".join(_render_card(e) for e in _renders) + "</div>") if _renders else mo.md(""),
+        (mo.accordion({"Paragraph being sung": mo.md(_facts["source"])}) if _is_faithful else
+         mo.accordion({"Key facts the song must teach": mo.md("\n".join(f"- {f}" for f in _facts["facts"]))})) if _facts else mo.md(""),
+        mo.Html("<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px'>"
+                + "".join(_render_card(e) for e in _renders) + "</div>") if _renders else mo.md(""),
+        mo.accordion({"Current lyrics": mo.plain_text(_latest_lyrics["lyrics"])}) if _latest_lyrics else mo.md(""),
     ])
-    return (Path,)
+    return
 
 
 @app.cell(hide_code=True)
