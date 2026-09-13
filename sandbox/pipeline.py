@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 # Use local directory for outputs
-HACK = Path(__file__).parent.parent / ".yue2"
+HACK = Path.home() / ".yue2"
 HACK.mkdir(parents=True, exist_ok=True)
 SKILL = Path(__file__).parent  # Local sandbox directory
 SOURCE_LAB = Path(__file__).parent / "runs/island-melody-vocal/melody_vocal.lab"
