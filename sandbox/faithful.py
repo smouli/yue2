@@ -29,7 +29,9 @@ def _number_words(n: int) -> list[str]:
         return [_TENS[n // 10]] + ([_ONES[n % 10]] if n % 10 else [])
     if n < 1000:
         return [_ONES[n // 100], "hundred"] + (_number_words(n % 100) if n % 100 else [])
-    if 1100 <= n < 2100 and n % 100:  # years read as "nineteen seventy one"
+    if 1100 <= n < 2000:  # years: "nineteen seventy one", "eighteen hundred"
+        return _number_words(n // 100) + (_number_words(n % 100) if n % 100 else ["hundred"])
+    if 2010 <= n < 2100:  # "twenty twenty six"
         return _number_words(n // 100) + _number_words(n % 100)
     if n < 1_000_000:
         return _number_words(n // 1000) + ["thousand"] + (_number_words(n % 1000) if n % 1000 else [])

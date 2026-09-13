@@ -17,7 +17,12 @@ MODEL = "openai/whisper-large-v3"
 
 
 def normalize(text: str) -> list[str]:
-    return re.sub(r"[^a-z0-9' ]+", " ", text.lower()).split()
+    """Lowercase words with numbers spelled out, so a sung "seventeen eighty s" matches Whisper's "1780s"."""
+    try:
+        from faithful import tokens  # sits beside this script
+        return tokens(text)
+    except ImportError:
+        return re.sub(r"[^a-z0-9' ]+", " ", text.lower()).split()
 
 
 def lyric_lines(lyrics: str) -> list[str]:
