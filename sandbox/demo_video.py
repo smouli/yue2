@@ -16,6 +16,7 @@ HACK = Path("/home/marimo/hack")
 RUNS = HACK / "runs"
 OUT = HACK / "video"
 W, H, FPS = 1280, 720, 24
+FACECAM = (1100, 20, 160)  # top-right bubble (x, y, diameter) kept clear in every scene except karaoke
 
 BG = (14, 17, 23)
 FG = (236, 238, 242)
@@ -84,6 +85,8 @@ calvin = json.loads((RUNS / "faithful-test-1.progress.json").read_text())
 calvin_render = next(e for e in calvin if e["step"] == "render")
 garbled = next(l for l in calvin_render["lines"] if l["line"].startswith("Such as ribulose"))
 book = json.loads((HACK / "playbook.json").read_text())
+GATE_PAGES = len(json.loads((RUNS / "gate-dataset.json").read_text()))
+GATE_DRAFTS = GATE_PAGES * 5  # playbook.GATE_TRIALS
 decisions = [d for step in book["decisions"] for d in step["decisions"] if d["action"] == "add"]
 
 lines = best["lines"]
@@ -94,9 +97,12 @@ excerpt_b = (lines[7]["start"] - 0.2, lines[9]["end"] + 0.6)  # steam power, iro
 
 # ------------------------------------------------------------------------------------------ timeline
 
+# The original recording is 115 BPM (SheetSage2 beat tracking); faithful songs are sung at 90 BPM for clarity.
+# The video plays our song at the original tempo, pitch unchanged.
+SPEED = 115 / 90
 S_HOOK, S_ASK, S_PROBLEM, S_LOOP, S_ACTION = (0, 5), (5, 11.5), (11.5, 22.5), (22.5, 34.5), (34.5, 52.5)
-KARAOKE_A = (53, 53 + excerpt_a[1] - excerpt_a[0])
-KARAOKE_B = (KARAOKE_A[1] + 1.2, KARAOKE_A[1] + 1.2 + excerpt_b[1] - excerpt_b[0])
+KARAOKE_A = (53, 53 + (excerpt_a[1] - excerpt_a[0]) / SPEED)
+KARAOKE_B = (KARAOKE_A[1] + 1.2, KARAOKE_A[1] + 1.2 + (excerpt_b[1] - excerpt_b[0]) / SPEED)
 S_TUNE = (KARAOKE_B[1] + 0.8, KARAOKE_B[1] + 18)
 S_LEARN = (S_TUNE[1], S_TUNE[1] + 12)
 S_BUILT = (S_LEARN[1], S_LEARN[1] + 6)
@@ -140,7 +146,7 @@ def scene_loop(d, t):
     centered(d, 70, "So it runs a loop", F_H2, blend(FG, a))
     steps = [
         ("Write", "fit the text to the melody, keeping its own words"),
-        ("Sing", "three takes at once on a CoreWeave GPU"),
+        ("Sing", "three takes at once on a marimo molab GPU"),
         ("Listen", "Whisper checks every line"),
         ("Score", "clarity, faithfulness, syllable fit"),
         ("Rewrite", "only the lines it misheard"),
@@ -173,13 +179,13 @@ def bar(d, x, y, w, label, value, color, alpha):
 
 def scene_action(d, t):
     a = fade(t, *S_ACTION)
-    centered(d, 50, "Industrial Revolution paragraph, pass by pass", F_H2, blend(FG, a))
+    centered(d, 90, "Industrial Revolution paragraph, pass by pass", F_H2, blend(FG, a))
     card_w, gap = 360, 30
     x0 = (W - (3 * card_w + 2 * gap)) / 2
     for i, e in enumerate(renders):
         s = a * ease((t - S_ACTION[0] - 0.6 - i * 1.6) / 0.6)
         grow = ease((t - S_ACTION[0] - 1.0 - i * 1.6) / 1.2)
-        x, y = x0 + i * (card_w + gap), 120
+        x, y = x0 + i * (card_w + gap), 195
         clarity = rescored["intelligibility"] if i == len(renders) - 1 else e["intelligibility"]
         d.rounded_rectangle((x, y, x + card_w, y + 250), radius=16, outline=blend(FAINT, s), width=2)
         d.text((x + 22, y + 18), f"Pass {e['render_pass']}", font=F_BODY_B, fill=blend(FG, s))
@@ -189,15 +195,15 @@ def scene_action(d, t):
         d.text((x + 22, y + 196), f"3 takes:  {takes}", font=F_SMALL, fill=blend(MUTED, s))
     s = a * ease((t - S_ACTION[0] - 7.5) / 0.6)
     first, last = renders[0]["lines"][0], rescored["lines"][0]
-    d.text((150, 430), "Line 1, pass 1", font=F_SMALL_B, fill=blend(MUTED, s))
-    d.text((150, 458), f"heard “{first['heard']}”", font=F_BODY, fill=blend(RED, s))
-    d.text((1000, 458), f"{round(first['score'] * 100)}%", font=F_BODY_B, fill=blend(RED, s))
+    d.text((150, 480), "Line 1, pass 1", font=F_SMALL_B, fill=blend(MUTED, s))
+    d.text((150, 506), f"heard “{first['heard']}”", font=F_BODY, fill=blend(RED, s))
+    d.text((1000, 506), f"{round(first['score'] * 100)}%", font=F_BODY_B, fill=blend(RED, s))
     s2 = a * ease((t - S_ACTION[0] - 10) / 0.6)
-    d.text((150, 520), "Line 1, pass 3", font=F_SMALL_B, fill=blend(MUTED, s2))
-    d.text((150, 548), f"heard “{last['heard']}”", font=F_BODY, fill=blend(GREEN, s2))
-    d.text((1000, 548), f"{round(last['score'] * 100)}%", font=F_BODY_B, fill=blend(GREEN, s2))
+    d.text((150, 556), "Line 1, pass 3", font=F_SMALL_B, fill=blend(MUTED, s2))
+    d.text((150, 582), f"heard “{last['heard']}”", font=F_BODY, fill=blend(GREEN, s2))
+    d.text((1000, 582), f"{round(last['score'] * 100)}%", font=F_BODY_B, fill=blend(GREEN, s2))
     s3 = a * ease((t - S_ACTION[0] - 12.5) / 0.6)
-    centered(d, 630, "Clear lines get locked. Misheard ones get rewritten and sung again.", F_BODY, blend(YELLOW, s3))
+    centered(d, 650, "Clear lines get locked. Misheard ones get rewritten and sung again.", F_BODY, blend(YELLOW, s3))
 
 
 PARA_BOX = (660, 150, 1200, 640)
@@ -237,7 +243,7 @@ def scene_karaoke(d, t):
         centered(d, 340, "…", F_TITLE, blend(MUTED, a))
         return
     a = fade(t, *window, 0.35)
-    song_t = excerpt[0] + (t - window[0])
+    song_t = excerpt[0] + (t - window[0]) * SPEED
     current = _current_line(song_t)
     d.text((80, 40), "It sings the paragraph itself.", font=F_H2, fill=blend(FG, a))
     d.text((80, 88), "Words light up as they're sung.", font=F_BODY, fill=blend(MUTED, a))
@@ -279,12 +285,12 @@ TUNING = [
 
 def scene_tune(d, t):
     a = fade(t, *S_TUNE)
-    centered(d, 40, "What we tune", F_H2, blend(FG, a))
-    centered(d, 88, "Every choice trades something. The loop measures both sides.", F_BODY, blend(MUTED, a))
+    centered(d, 60, "What we tune", F_H2, blend(FG, a))
+    centered(d, 108, "Every choice trades something. The loop measures both sides.", F_BODY, blend(MUTED, a))
     for r, (tradeoff, decision, evidence) in enumerate(TUNING):
         s = a * ease((t - S_TUNE[0] - 1.2 - r * 2.2) / 0.6)
-        y = 160 + r * 104
-        d.rounded_rectangle((70, y, 1210, y + 88), radius=12, outline=blend(FAINT, s), width=2)
+        y = 196 + r * 100
+        d.rounded_rectangle((70, y, 1210, y + 86), radius=12, outline=blend(FAINT, s), width=2)
         d.text((92, y + 14), tradeoff, font=F_BODY_B, fill=blend(YELLOW, s))
         d.text((92, y + 50), decision, font=F_SMALL, fill=blend(FG, s))
         ev_w = d.textlength(evidence, font=F_SMALL_B)
@@ -295,12 +301,15 @@ def scene_learn(d, t):
     a = fade(t, *S_LEARN)
     kept = [x for x in decisions if x["accepted"]]
     rejected = sorted([x for x in decisions if not x["accepted"]], key=lambda x: x["gain"])[:3]
-    centered(d, 60, "Across songs, it learns rules and tests each one", F_H2, blend(FG, a))
-    centered(d, 112, f"{len(kept)} of {len(decisions)} proposed rules passed an A/B test on new pages", F_BODY, blend(MUTED, a))
+    centered(d, 40, "Across songs, it learns rules and tests each one", F_H2, blend(FG, a))
+    centered(d, 90, f"{len(book['learned_from'])} training songs proposed {len(decisions)} rules. Each was A/B tested on "
+             f"{GATE_DRAFTS} drafts across {GATE_PAGES} new pages.", F_SMALL, blend(MUTED, a))
+    centered(d, 120, f"{len(kept)} kept. No model weights were changed: the loop learns rules, not parameters.",
+             F_SMALL, blend(MUTED, a))
     rows = [(x, True) for x in kept] + [(x, False) for x in rejected]
     for r, (x, ok) in enumerate(rows):
         s = a * ease((t - S_LEARN[0] - 1.0 - r * 0.9) / 0.5)
-        y = 185 + r * 78
+        y = 196 + r * 78
         badge = "KEPT" if ok else "REJECTED"
         color = GREEN if ok else RED
         d.rounded_rectangle((90, y, 230, y + 40), radius=8, outline=blend(color, s), width=2)
@@ -314,8 +323,9 @@ def scene_learn(d, t):
 def scene_built(d, t):
     a = fade(t, *S_BUILT)
     centered(d, 250, "Built in a weekend", F_H2, blend(FG, a))
-    centered(d, 320, "Weave traces and evaluations  ·  marimo on molab  ·  W&B Inference", F_BODY, blend(MUTED, a))
-    centered(d, 360, "YuE2, SheetSage2 and Whisper on a CoreWeave GPU", F_BODY, blend(MUTED, a))
+    centered(d, 320, "Weave traces and evaluations  ·  W&B Inference", F_BODY, blend(MUTED, a))
+    centered(d, 360, "YuE2, SheetSage2 and Whisper on a marimo molab GPU", F_BODY, blend(MUTED, a))
+    centered(d, 400, "Lyric writer picked by a Weave eval of 10 open models", F_BODY, blend(MUTED, a))
 
 
 SCENES = [(S_HOOK, scene_hook), (S_ASK, scene_ask), (S_PROBLEM, scene_problem), (S_LOOP, scene_loop),
@@ -352,9 +362,11 @@ def render_video():
     for k, (path, start, end, at) in enumerate(clips):
         inputs += ["-i", str(path)]
         ms = int(at * 1000)
+        speed = SPEED if path == song else 1.0  # the garbled clip was already sung at 115 BPM
+        length = (end - start) / speed
         filters.append(f"[{k}:a]aresample=44100,aformat=channel_layouts=stereo,atrim={start}:{end},asetpts=PTS-STARTPTS,"
-                       f"afade=t=in:d=0.25,afade=t=out:st={max(0, end - start - 0.5)}:d=0.5,adelay={ms}|{ms},"
-                       f"apad=whole_dur={DURATION}[a{k}]")
+                       f"atempo={speed},afade=t=in:d=0.25,afade=t=out:st={max(0, length - 0.5)}:d=0.5,"
+                       f"adelay={ms}|{ms},apad=whole_dur={DURATION}[a{k}]")
 
     # Instrumental bed: quiet under captions, dipped under the garbled clip, silent while the full song plays.
     ramp = 0.8
@@ -364,7 +376,7 @@ def render_video():
             f"-{window(KARAOKE_A[0], KARAOKE_B[1])})*clip(({DURATION}-t)/2,0,1)*clip(t/1.5,0,1)")
     bed = len(clips)
     inputs += ["-i", str(INSTRUMENTAL), "-i", str(INSTRUMENTAL)]  # two copies back to back cover the video
-    filters.append(f"[{bed}:a][{bed + 1}:a]concat=n=2:v=0:a=1,aresample=44100,aformat=channel_layouts=stereo,"
+    filters.append(f"[{bed}:a][{bed + 1}:a]concat=n=2:v=0:a=1,aresample=44100,aformat=channel_layouts=stereo,atempo={SPEED},"
                    f"atrim=0:{DURATION},asetpts=PTS-STARTPTS,volume=eval=frame:volume='{gain}'[bed]")
     filters.append("".join(f"[a{k}]" for k in range(len(clips))) + f"[bed]amix=inputs={len(clips) + 1}:normalize=0:duration=longest[aout]")
 
@@ -374,6 +386,11 @@ def render_video():
     audio_seconds = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
                                           str(audio)], capture_output=True, text=True, check=True).stdout)
     assert audio_seconds > DURATION - 1, f"audio track is {audio_seconds:.1f}s, expected {DURATION:.1f}s"
+
+    timeline = {"duration": DURATION, "hook": S_HOOK, "ask": S_ASK, "problem": S_PROBLEM, "garbled_clip": [GARBLED_AT, garbled_end],
+                "loop": S_LOOP, "action": S_ACTION, "karaoke": [KARAOKE_A[0], KARAOKE_B[1]], "tune": S_TUNE,
+                "learn": S_LEARN, "built": S_BUILT, "facecam": FACECAM}
+    (OUT / "timeline.json").write_text(json.dumps(timeline, indent=2))
 
     final = OUT / "yue2-demo.mp4"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(silent), "-i", str(audio), "-map", "0:v", "-map", "1:a",
