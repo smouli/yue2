@@ -1,15 +1,13 @@
 # yue2: listen to what you read
 
-CoreWeave Hacks: Agent Loops (Sep 12–13, 2026). We're building an app to make and remix music. This
-weekend's question: can it sing what you're reading?
+We're building an app to make and remix music. The question here: can it sing what you're reading?
 
 Give it a paragraph from a web page or textbook. An autonomous loop sets the paragraph's own words to an
 existing melody (the demo uses *Island in the Sun* by Weezer), sings it, listens back, and rewrites whatever
 it can't hear clearly, until the song is clear, faithful to the text and fits the tune. Across songs, it
 proposes rules for itself and keeps only the ones that win an A/B test.
 
-**Demo video:** attached to the [hackathon-submission release](../../releases/tag/hackathon-submission)
-(2:49, with voiceover). **Traces and evaluations:** [Weave project](https://wandb.ai/sanatmouli-scoredata/yue2/weave).
+**Traces and evaluations:** [Weave project](https://wandb.ai/sanatmouli-scoredata/yue2/weave).
 
 ## The loop
 
@@ -116,5 +114,5 @@ work folder with them; back up renders you want to keep.
 
 - This repo has no license file yet, so the code is all rights reserved by default. YuE2's code is Apache 2.0.
 - **YuE2 and SheetSage2 weights are CC BY-NC 4.0**: noncommercial use only.
-- The demo sets new lyrics to the melody of *Island in the Sun* (Weezer) for a noncommercial hackathon demo. The
+- The demo sets new lyrics to the melody of *Island in the Sun* (Weezer) for a noncommercial demo. The
   original recording is not distributed; audio files and transcribed scores of it are gitignored.
