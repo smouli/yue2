@@ -36,7 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event = dict(event)
         if "audio_key" in event:
             event["audio_url"] = store.url(event["audio_key"])
-        if event.get("takes"):
+        if isinstance(event.get("takes"), list):  # the setup event's "takes" is a count
             event["takes"] = [{**t, "audio_url": store.url(t["audio_key"])} for t in event["takes"]]
         if event.get("best", {}).get("audio_key"):
             event["best"] = {**event["best"], "audio_url": store.url(event["best"]["audio_key"])}

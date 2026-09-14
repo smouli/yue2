@@ -43,10 +43,12 @@ def main(argv: list[str] | None = None) -> None:
         import os
         import subprocess
 
-        cli = str(Path(settings.yue2_python).with_name("huggingface-cli"))
+        # huggingface_hub's Python API rather than its CLI, whose name changed between releases.
+        download = "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1])"
         for repo in ("m-a-p/YuE2-3B", "m-a-p/YuE2-Vae", "m-a-p/MERT-v2-FullSong", "openai/whisper-large-v3"):
             print("downloading", repo, flush=True)
-            subprocess.run([cli, "download", repo], check=True, env={**os.environ, "HF_HOME": settings.hf_home})
+            subprocess.run([settings.yue2_python, "-c", download, repo], check=True,
+                           env={**os.environ, "HF_HOME": settings.hf_home})
         print("models ready in", settings.hf_home)
     elif args.command == "add-melody":
         from yue2 import melody as melody_module, storage

@@ -48,3 +48,12 @@ def test_worker_processes_a_song(conn, settings):
     assert found["status"] == "done", found["error"]
     assert found["events"][0]["step"] == "setup" and found["events"][-1]["step"] == "done"
     assert found["title"].startswith("Industrial Revolution")
+
+    from fastapi.testclient import TestClient
+
+    from yue2.api.app import create_app
+
+    body = TestClient(create_app(settings)).get(f"/api/songs/{song_id}").json()
+    done = body["events"][-1]
+    assert done["best"]["audio_url"].startswith("/files/songs/")
+    assert all(t["audio_url"] for e in body["events"] if e["step"] == "render" for t in e["takes"])
