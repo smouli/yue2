@@ -16,9 +16,6 @@ HACK = Path.home() / ".yue2"
 HACK.mkdir(parents=True, exist_ok=True)
 SKILL = Path(__file__).parent  # Local sandbox directory
 SOURCE_LAB = Path(__file__).parent / "runs/island-melody-vocal/melody_vocal.lab"
-SOURCE_SECTION = (0, 200)  # Use full melody
-SOURCE_ABC = Path(__file__).parent / "runs/island-melody-vocal/score.abc"
-PHRASE_BUDGET = [7, 7, 7, 7, 7, 8, 13]  # vocal notes per phrase: verse 1 (4 lines), chorus 1 (3 lines)
 
 
 def _env() -> dict:
@@ -59,7 +56,7 @@ def count_syllables(word: str) -> int:
     return max(n, 1)
 
 
-def syllable_fit(lyrics: str, budget: list[int] = PHRASE_BUDGET, tolerance: int = 0) -> dict:
+def syllable_fit(lyrics: str, budget: list[int], tolerance: int = 0) -> dict:
     """Per-line syllables vs melody notes; 1.0 means every line is within `tolerance` of its phrase."""
     lines = lyric_lines(lyrics)
     per_line = []
@@ -74,7 +71,7 @@ def syllable_fit(lyrics: str, budget: list[int] = PHRASE_BUDGET, tolerance: int 
     return {"syllable_fit": round(score, 3), "line_count_ok": len(lines) == len(budget), "syllable_lines": per_line}
 
 
-def render(request: dict, out_dir: Path, abc_file: Path = SOURCE_ABC) -> dict:
+def render(request: dict, out_dir: Path, abc_file: Path) -> dict:
     out_dir = Path(out_dir)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     req_path = out_dir.with_suffix(".request.json")
@@ -90,13 +87,13 @@ def _notes(lab: Path, start: float = 0, end: float = 1e9) -> list[int]:
     return [int(float(r[2])) for r in rows if start <= float(r[0]) < end]
 
 
-def melody_fidelity(audio: str, ranges: list[tuple[float, float]] | None = None) -> dict:
+def melody_fidelity(audio: str, ranges: list[tuple[float, float]]) -> dict:
     """Re-transcribe the render and compare its vocal melody to the source sections it was sung over."""
     out = Path(audio).parent.with_name(Path(audio).parent.name + "-transcription")
     seconds = _run([str(HACK / ".venv-sheetsage2/bin/python"), "scripts/transcribe.py", audio,
                     "--task", "melody-vocal", "--model", str(HACK / "models/SheetSage2"),
                     "--output", str(out)], cwd=SKILL)
-    source = [p for start, end in (ranges or [SOURCE_SECTION]) for p in _notes(SOURCE_LAB, start, end)]
+    source = [p for start, end in ranges for p in _notes(SOURCE_LAB, start, end)]
     cover = _notes(out / "melody_vocal.lab")
     intervals = lambda p: [b - a for a, b in zip(p, p[1:])]
     return {

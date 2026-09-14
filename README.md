@@ -26,10 +26,8 @@ paragraph ──► TEXT PASSES (seconds, up to 4)
 across songs: coach proposes rules ──► A/B test on 40 first drafts from 8 new pages ──► keep if it helps
 ```
 
-Two modes share the engine:
-- **Faithful** (default): sing the paragraph itself. Allowed edits: split sentences at pauses, drop filler
-  words, contractions, numbers and symbols written out as spoken; never paraphrase.
-- **Summary**: extract six key facts and teach them, scored with a quiz and a naturalness judge.
+The writer sings the paragraph itself. Allowed edits: split sentences at pauses, drop filler words,
+contractions, numbers and symbols written out as spoken; never paraphrase.
 
 ## Scoring rubric
 
@@ -45,8 +43,7 @@ Two modes share the engine:
 | **Melody check** | SheetSage2 re-transcribes the take; notes vs. the original | guardrail | reported only |
 
 Best of 3 takes = mean of song clarity and its worst line. Best pass = heard clearly × faithful. None of these
-three core scores is graded by an LLM. Summary mode adds LLM-based scores: facts taught (a quiz answered from the
-lyrics alone, then graded) and naturalness (a judge).
+scores is graded by an LLM.
 
 ## Results
 
@@ -58,25 +55,17 @@ lyrics alone, then graded) and naturalness (a judge).
 | Faithful mode, Industrial Revolution paragraph | heard clearly 0.63 → 0.80 over 3 passes, faithfulness 0.88 |
 | Tempo diagnostic, same lyrics | 115 BPM 0.17, 90 BPM 0.52 |
 | Take variance, same lyrics | 0.22 to 0.81 across seeds |
-| Summary mode, black holes | heard clearly 0.88 → 0.96 across passes; best-of-3 reached every target in one pass |
-| Loop run, photosynthesis (3 takes) | one Weave trace: 17 W&B Inference calls (~11k tokens), 5 text passes, 9 takes rendered |
-| Writer bake-off (Weave Evaluation, corrected scorer) | Gemma 4 31B best: syllable fit 0.97, facts 0.67, naturalness 0.50. Reasoning models (Kimi, GLM, MiniMax, Nemotron) mostly returned no lyrics |
-| Ungated playbook, 4 held-out pages | final score 0.74 → 0.84, but syllable fit 0.98 → 0.92 and naturalness 0.44 → 0.31; no first-draft gain on 8 new pages |
-| Gated playbook, 6 training songs | 3 of 18 proposed rules kept (+0.035, +0.039, +0.044); rejected rules ranged down to −0.057 |
-| Data produced | 32 loop runs, 225 lyric drafts, 184 sung takes, 68 render passes; ~960 drafts scored in rule A/B tests |
 
 ### Bugs the evaluations caught
-- **Facts taught read grader replies with `bool()`**, so a reply of `"false"` counted as correct: unrelated lyrics
-  scored 1.0 on an immune-system quiz. Fixed; unrelated lyrics now score 0.0, lyrics stating the facts 1.0.
-- **The quiz taker used outside knowledge** instead of the lyrics alone. Fixed in the prompt and verified.
-- **Clarity and facts oscillated** when every pass rewrote the whole song. Fixed by locking clear lines and
+- **Rewrites undid earlier fixes** when every pass rewrote the whole song. Fixed by locking clear lines and
   rendering the best draft, not the last.
 - **Faithful mode got stuck**: the listener asked to reword, faithful rules forbid it, and the same seed rendered
   the same song. Fixed with new seeds per pass and feedback that respects faithfulness.
 
 ### Not finished
-- The held-out comparison for the **gated** playbook: W&B Inference returned `insufficient_quota` after the first
-  of four test pages.
+- **The playbook experiments need a rerun.** The earlier runs scored rules with a fact-quiz mode that has since been
+  removed; the rule A/B tests now use syllable fit and faithfulness, and have not been run yet.
+- **The writer bake-off needs a rerun** on faithful-mode scores; Gemma 4 31B was chosen under the old scores.
 - **No model weights were trained.** The loop learns rules, not parameters. Next step: fine-tune a small writer
   on the loop's best lyrics and serve it as a LoRA on W&B Inference.
 
@@ -84,7 +73,7 @@ lyrics alone, then graded) and naturalness (a judge).
 
 | Path | What |
 |---|---|
-| `sandbox/loop.py` | the loop: summary mode (`run_loop`) and faithful mode (`run_faithful`), text and render passes, best-of-N takes |
+| `sandbox/loop.py` | the loop (`run_faithful`): song plan, text and render passes, best-of-N takes |
 | `sandbox/pipeline.py` | YuE2 render, syllable fit, SheetSage2 melody check, Whisper intelligibility (each model in its own venv) |
 | `sandbox/faithful.py` | faithfulness score, number normalization, source-word spans for karaoke |
 | `sandbox/melody.py` | melody profile: sections and phrases detected from the transcription; tempo control |

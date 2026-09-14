@@ -33,16 +33,29 @@ def _():
 
 @app.cell(hide_code=True)
 def demo_controls(Path, json, mo, sys):
-    DEMO_CODE = "/home/marimo/hack/branches/faithful"
-    DEMO_RUNS = Path("/home/marimo/hack/runs")
-    FAITHFUL = "Sing the text"
-    SUMMARY = "Teach the key facts"
+    # Use local paths for ~/.yue2/ directory
+    DEMO_CODE = str(Path(__file__).parent / "sandbox")
+    DEMO_RUNS = Path.home() / ".yue2/runs"
+    DEMO_RUNS.mkdir(parents=True, exist_ok=True)
     if DEMO_CODE not in sys.path:
         sys.path.insert(0, DEMO_CODE)
     for _module in ("singalong", "faithful"):
         sys.modules.pop(_module, None)  # pick up this branch's versions
-    import singalong
-    import faithful as demo_faithful
+
+    # Try to import local modules (they're in yue2/sandbox/)
+    try:
+        import singalong
+        import faithful as demo_faithful
+    except (ImportError, ModuleNotFoundError):
+        # Fallback stubs if modules not found
+        class singalong:
+            @staticmethod
+            def from_result(*args, **kwargs):
+                pass
+        class demo_faithful:
+            @staticmethod
+            def clean_source(text):
+                return text.strip()
 
     get_demo_run, set_demo_run = mo.state(None)
     get_demo_done, set_demo_done = mo.state(None)
@@ -51,12 +64,10 @@ def demo_controls(Path, json, mo, sys):
         _names = []
         for _p in sorted(DEMO_RUNS.glob("*.progress.json"), key=lambda p: p.stat().st_mtime, reverse=True):
             _events = json.loads(_p.read_text())
-            if _events and _events[-1]["step"] == "done" and (
-                    "alignment" in _events[-1]["best"] or "source_words" in _events[-1]["best"]):
+            if _events and _events[-1]["step"] == "done" and "source_words" in _events[-1]["best"]:
                 _names.append(_p.name.removesuffix(".progress.json"))
         return _names
 
-    demo_mode = mo.ui.radio(options=[FAITHFUL, SUMMARY], value=FAITHFUL, inline=True)
     demo_url = mo.ui.text(value="https://en.wikipedia.org/wiki/Industrial_Revolution",
                           placeholder="Paste a Wikipedia or textbook URL", full_width=True)
     demo_takes = mo.ui.slider(1, 4, value=3, show_value=True, label="Takes per render")
@@ -69,16 +80,13 @@ def demo_controls(Path, json, mo, sys):
         mo.md("# 🎧 Listen to what you read\n"
               "Paste a page. The agent sets its words to the melody of *Island in the Sun*, sings them, listens back "
               "with Whisper, and rewrites whatever it can't hear clearly, keeping the text's own wording."),
-        demo_mode,
         demo_url,
     ])
     return (
         DEMO_CODE,
         DEMO_RUNS,
-        FAITHFUL,
         demo_faithful,
         demo_go,
-        demo_mode,
         demo_past,
         demo_refresh,
         demo_takes,
@@ -93,10 +101,8 @@ def demo_controls(Path, json, mo, sys):
 
 @app.cell(hide_code=True)
 def demo_paragraphs(
-    FAITHFUL,
     demo_faithful,
     demo_go,
-    demo_mode,
     demo_past,
     demo_takes,
     demo_url,
@@ -108,7 +114,7 @@ def demo_paragraphs(
         _text = trafilatura.extract(trafilatura.fetch_url(url) or "") or ""
         return [demo_faithful.clean_source(_p) for _p in _text.splitlines() if 35 <= len(_p.split()) <= 110]
 
-    _paras = _page_paragraphs(demo_url.value) if demo_mode.value == FAITHFUL and demo_url.value.strip() else []
+    _paras = _page_paragraphs(demo_url.value) if demo_url.value.strip() else []
     _options = {f"{_i + 1}. {_p[:110]}{'…' if len(_p) > 110 else ''}": _p for _i, _p in enumerate(_paras[:30])}
     demo_paragraph = mo.ui.dropdown(options=_options, value=next(iter(_options), None),
                                     label="Paragraph to sing", full_width=True)
@@ -116,7 +122,8 @@ def demo_paragraphs(
                                 full_width=True, rows=3)
 
     mo.vstack([
-        (mo.vstack([demo_paragraph, demo_text]) if demo_mode.value == FAITHFUL else mo.md("")),
+        demo_paragraph,
+        demo_text,
         mo.hstack([demo_takes, demo_go, demo_past], justify="start", gap=2, align="center"),
     ])
     return demo_paragraph, demo_text
@@ -126,10 +133,8 @@ def demo_paragraphs(
 def demo_launch(
     DEMO_CODE,
     DEMO_RUNS,
-    FAITHFUL,
     Path,
     demo_go,
-    demo_mode,
     demo_paragraph,
     demo_takes,
     demo_text,
@@ -151,16 +156,12 @@ def demo_launch(
                 os.environ[_k] = _v
         _slug = re.sub(r"[^a-z0-9]+", "-", demo_url.value.rstrip("/").rsplit("/", 1)[-1].lower()).strip("-")[:30] or "page"
         _log = "/home/marimo/hack/logs/loop-{run}.log"
-        if demo_mode.value == FAITHFUL:
-            _run = f"sing-{_slug}-{time.strftime('%H%M%S')}"
-            _paragraph = demo_text.value.strip() or demo_paragraph.value or ""
-            mo.stop(not _paragraph, mo.md("**Pick a paragraph or paste one first.**"))
-            _file = DEMO_RUNS / f"{_run}.txt"
-            _file.write_text(_paragraph)
-            _cmd = f"run_faithful.py {_file} {_run} {demo_takes.value} {shlex.quote(demo_url.value)}"
-        else:
-            _run = f"facts-{_slug}-{time.strftime('%H%M%S')}"
-            _cmd = f"run_loop.py {shlex.quote(demo_url.value)} {_run} {demo_takes.value}"
+        _run = f"sing-{_slug}-{time.strftime('%H%M%S')}"
+        _paragraph = demo_text.value.strip() or demo_paragraph.value or ""
+        mo.stop(not _paragraph, mo.md("**Pick a paragraph or paste one first.**"))
+        _file = DEMO_RUNS / f"{_run}.txt"
+        _file.write_text(_paragraph)
+        _cmd = f"run_faithful.py {_file} {_run} {demo_takes.value} {shlex.quote(demo_url.value)}"
         subprocess.Popen(f"cd {DEMO_CODE} && nohup {sys.executable} {_cmd} > {_log.format(run=_run)} 2>&1 &", shell=True)
         set_demo_done(None)
         set_demo_run(_run)
@@ -191,9 +192,7 @@ def demo_progress(
     if _done and get_demo_done() != _run:
         set_demo_done(_run)
 
-    _facts = next((e for e in _events if e["step"] == "facts"), None)
-    _is_faithful = bool(_facts) and _facts.get("mode") == "faithful"
-    _content_label = "Faithful to text" if _is_faithful else "Facts taught"
+    _setup = next((e for e in _events if e["step"] == "setup"), None)
     _texts = [e for e in _events if e["step"] == "text"]
     _renders = [e for e in _events if e["step"] == "render"]
 
@@ -201,7 +200,7 @@ def demo_progress(
         _status = "❌ The loop crashed"
     elif _done:
         _status = "✅ Done. Press play below"
-    elif not _facts:
+    elif not _setup:
         _status = "📖 Reading the page…"
     elif not _texts or (_renders and _renders[-1]["render_pass"] == _texts[-1]["render_pass"]):
         _status = f"✍️ Rewriting lyrics (render pass {len(_renders) + 1})…"
@@ -209,8 +208,8 @@ def demo_progress(
         _t = _texts[-1]
         _status = (f"🎤 Singing render pass {_t['render_pass']} and listening back…"
                    if _t["syllable_fit"] >= 0.95 or _t["text_pass"] >= 4 else
-                   f"✍️ Fitting {'the text' if _is_faithful else 'lyrics'} to the melody: draft {_t['render_pass']}.{_t['text_pass']} "
-                   f"(syllable fit {_t['syllable_fit']:.2f}, {_content_label.lower()} {_t['fact_coverage']:.2f})")
+                   f"✍️ Fitting the text to the melody: draft {_t['render_pass']}.{_t['text_pass']} "
+                   f"(syllable fit {_t['syllable_fit']:.2f}, faithful to text {_t['faithfulness']:.2f})")
 
     def _bar(label, value, color):
         _pct = round(value * 100)
@@ -230,18 +229,17 @@ def demo_progress(
         return (f"<div style='padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,currentColor 15%,transparent);display:grid;gap:6px'>"
                 f"<b>Render pass {e['render_pass']}</b>"
                 + _bar("Heard clearly", e["intelligibility"], "#2fb36d")
-                + _bar(_content_label, e["fact_coverage"], "#3aa6f5")
+                + _bar("Faithful to text", e["faithfulness"], "#3aa6f5")
                 + _bar("Syllable fit", e["syllable_fit"], "#f5b82e")
                 + f"<div style='display:flex;gap:6px;flex-wrap:wrap'>{_chips}</div>"
                 + f"<span style='font-size:12px;opacity:.7'>{'all lines clear' if not _weak else f'{_weak} line(s) misheard → rewrite'}</span></div>")
 
     _latest_lyrics = (_renders[-1] if _renders and (not _texts or _renders[-1]["t"] >= _texts[-1]["t"]) else (_texts[-1] if _texts else None))
     mo.vstack([
-        mo.hstack([mo.md(f"### {_facts['topic'] if _facts else _run}"), demo_refresh], justify="space-between", align="center"),
+        mo.hstack([mo.md(f"### {_setup['topic'] if _setup else _run}"), demo_refresh], justify="space-between", align="center"),
         mo.md(f"**{_status}** · {len(_texts)} lyric drafts · {len(_renders)} render passes"),
         mo.plain_text(_log_text[-1500:]) if _failed else mo.md(""),
-        (mo.accordion({"Paragraph being sung": mo.md(_facts["source"])}) if _is_faithful else
-         mo.accordion({"Key facts the song must teach": mo.md("\n".join(f"- {f}" for f in _facts["facts"]))})) if _facts else mo.md(""),
+        mo.accordion({"Paragraph being sung": mo.md(_setup["source"])}) if _setup else mo.md(""),
         mo.Html("<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px'>"
                 + "".join(_render_card(e) for e in _renders) + "</div>") if _renders else mo.md(""),
         mo.accordion({"Current lyrics": mo.plain_text(_latest_lyrics["lyrics"])}) if _latest_lyrics else mo.md(""),
@@ -262,13 +260,13 @@ def demo_player(
     _run = get_demo_done()
     mo.stop(_run is None)
     _events = json.loads((DEMO_RUNS / f"{_run}.progress.json").read_text())
-    _facts = next(e for e in _events if e["step"] == "facts")
+    _setup = next(e for e in _events if e["step"] == "setup")
     _done = _events[-1]
     _flac = Path(_done["best"]["audio"])
     _mp3 = _flac.with_suffix(".mp3")
     if not _mp3.exists():
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(_flac), "-b:a", "160k", str(_mp3)], check=True)
-    singalong.from_result(_done, _facts, _mp3)
+    singalong.from_result(_done, _setup, _mp3)
     return
 
 
@@ -352,7 +350,7 @@ def run_picker_cell(Path, mo):
 @app.cell
 def loop_run_viewer(Path, json, mo, run_picker, subprocess):
     _events = json.loads((Path("/home/marimo/hack/runs") / f"{run_picker.value}.progress.json").read_text())
-    _facts = next(e for e in _events if e["step"] == "facts")
+    _setup = next(e for e in _events if e["step"] == "setup")
     _renders = [e for e in _events if e["step"] == "render"]
     _texts = [e for e in _events if e["step"] == "text"]
 
@@ -365,15 +363,15 @@ def loop_run_viewer(Path, json, mo, run_picker, subprocess):
     def _pass_card(e):
         _lines = "\n".join(f"{'✅' if l['score'] >= 0.85 else '⚠️'} {l['score']:.2f}  {l['line']}\n        heard: {l['heard']}" for l in e["lines"])
         return mo.vstack([
-            mo.md(f"### Render pass {e['render_pass']}\n**intelligibility {e['intelligibility']:.2f}** · facts {e['fact_coverage']:.2f} · syllable fit {e['syllable_fit']:.2f} · melody {e['melody_fidelity']:.2f}"),
+            mo.md(f"### Render pass {e['render_pass']}\n**intelligibility {e['intelligibility']:.2f}** · faithful {e['faithfulness']:.2f} · syllable fit {e['syllable_fit']:.2f} · melody {e['melody_fidelity']:.2f}"),
             mo.audio(src=_mp3(e["audio"])),
             mo.plain_text(_lines),
         ])
 
     mo.vstack([
-        mo.md(f"## {_facts['topic']}: {len(_texts)} text passes, {len(_renders)} render passes"),
-        mo.accordion({"Facts the song must teach": mo.md("\n".join(f"- {f}" for f in _facts["facts"]))}),
-        mo.ui.table([{"pass": f"text {e['render_pass']}.{e['text_pass']}", "syllable_fit": e["syllable_fit"], "fact_coverage": e["fact_coverage"], "locked_lines": str(e.get("locked_lines", ""))} for e in _texts], selection=None, label="Text passes"),
+        mo.md(f"## {_setup['topic']}: {len(_texts)} text passes, {len(_renders)} render passes"),
+        mo.accordion({"Paragraph being sung": mo.md(_setup["source"])}),
+        mo.ui.table([{"pass": f"text {e['render_pass']}.{e['text_pass']}", "syllable_fit": e["syllable_fit"], "faithfulness": e["faithfulness"], "locked_lines": str(e.get("locked_lines", ""))} for e in _texts], selection=None, label="Text passes"),
         mo.hstack([_pass_card(e) for e in _renders], widths="equal", wrap=True),
     ])
     return
