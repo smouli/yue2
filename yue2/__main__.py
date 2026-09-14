@@ -1,4 +1,4 @@
-"""python -m yue2 {api,worker,init-db,add-melody}"""
+"""python -m yue2 {api,worker,dispatch,run-song,remote,init-db,fetch-models,add-melody}"""
 
 import argparse
 import sys
@@ -14,10 +14,17 @@ def main(argv: list[str] | None = None) -> None:
     api.add_argument("--port", type=int, default=8080)
     worker = sub.add_parser("worker", help="run songs from the queue")
     worker.add_argument("--once", action="store_true", help="exit when the queue is empty")
+    dispatch = sub.add_parser("dispatch", help="run queued songs as one-off jobs on YUE2_RUNNER (modal, coreweave, process)")
+    dispatch.add_argument("--once", action="store_true", help="exit when the queue is empty and no jobs are running")
+    run_song = sub.add_parser("run-song", help="run one song inside a job (started by the dispatcher)")
+    run_song.add_argument("song_id")
+    remote = sub.add_parser("remote", help="run a yue2 command as a one-off job on YUE2_RUNNER, e.g. remote fetch-models")
+    remote.add_argument("args", nargs=argparse.REMAINDER)
     sub.add_parser("init-db", help="create the database tables")
     sub.add_parser("fetch-models", help="download model weights into HF_HOME (GPU worker image)")
     melody = sub.add_parser("add-melody", help="transcribe a song into a melody profile and save it to storage")
     melody.add_argument("--audio", type=Path, help="source recording (not needed with fake models)")
+    melody.add_argument("--audio-key", help="source recording already in storage (for add-melody in a remote job)")
     args = parser.parse_args(argv)
 
     from yue2.config import Settings
@@ -33,6 +40,20 @@ def main(argv: list[str] | None = None) -> None:
         from yue2 import worker as worker_module
 
         worker_module.main(once=args.once)
+    elif args.command == "dispatch":
+        from yue2 import dispatcher
+
+        dispatcher.main(once=args.once)
+    elif args.command == "run-song":
+        from yue2 import worker as worker_module
+
+        worker_module.run_one(args.song_id)
+    elif args.command == "remote":
+        from yue2 import dispatcher
+
+        if not args.args:
+            sys.exit("usage: python -m yue2 remote <command> [args], e.g. remote fetch-models")
+        sys.exit(dispatcher.remote(args.args))
     elif args.command == "init-db":
         from yue2 import db
 
@@ -40,27 +61,22 @@ def main(argv: list[str] | None = None) -> None:
             db.init_schema(conn)
         print("database ready")
     elif args.command == "fetch-models":
-        import os
-        import subprocess
+        from yue2.models import weights
 
-        # huggingface_hub's Python API rather than its CLI, whose name changed between releases.
-        download = "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1])"
-        for repo in ("m-a-p/YuE2-3B", "m-a-p/YuE2-Vae", "m-a-p/MERT-v2-FullSong", "openai/whisper-large-v3"):
-            print("downloading", repo, flush=True)
-            subprocess.run([settings.yue2_python, "-c", download, repo], check=True,
-                           env={**os.environ, "HF_HOME": settings.hf_home})
-        print("models ready in", settings.hf_home)
+        weights.fetch(settings)
     elif args.command == "add-melody":
         from yue2 import melody as melody_module, storage
         from yue2.models import base
         from yue2.worker import PROFILE_KEY
 
         models = base.load(settings)
+        store = storage.load(settings)
+        if args.audio_key:
+            args.audio = store.get(args.audio_key, Path(tempfile.mkdtemp()) / Path(args.audio_key).name)
         if settings.models != "fake" and not args.audio:
-            sys.exit("--audio is required with local models")
+            sys.exit("--audio (or --audio-key) is required with local models")
         out = models.transcribe_song(args.audio, Path(tempfile.mkdtemp()) / settings.melody_name)
         profile = melody_module.load_profile(out)  # fails loudly if the transcription can't be used
-        store = storage.load(settings)
         for name in melody_module.PROFILE_FILES:
             store.put(out / name, PROFILE_KEY.format(name=settings.melody_name, file=name))
         singable = [s for s in profile["sections"] if s.name in melody_module.SINGABLE]

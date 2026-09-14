@@ -3,8 +3,10 @@
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 UV_PYTHON_INSTALL_DIR=/opt/python UV_LINK_MODE=copy
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg git ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=ghcr.io/astral-sh/uv:0.8 /uv /usr/local/bin/uv
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg git ca-certificates curl && rm -rf /var/lib/apt/lists/*
+# uv from its installer rather than a COPY --from stage, so image builders without multi-stage support (Modal) work.
+ARG UV_VERSION=0.8.0
+RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 
 # YuE2 runtime, pinned to the revision the loop was developed against.
 ARG YUE_REF=88da114

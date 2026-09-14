@@ -19,6 +19,8 @@ dependencies = [
 
 [project.optional-dependencies]
 tracing = ["weave>=0.52"]
+modal = ["modal>=1.5"]
+coreweave = ["cwsandbox>=1.14"]
 dev = ["pytest>=8", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]
