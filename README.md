@@ -105,11 +105,7 @@ Queue tests need Postgres (`DATABASE_URL`) and skip without it.
 
 ## How it's built
 
-```
-web (FastAPI + UI) ──► Postgres: songs, progress events, job queue ◄── worker(s) ──► writer API
-        │                                                  ◄── or dispatcher ──► a sandbox per song
-        └────────────── storage: local folder or S3-compatible bucket ◄───┘
-```
+![How it runs](docs/architecture.svg)
 
 - **Settings come from the environment** ([yue2/config.py](yue2/config.py)), so the same images run on a laptop,
   a GPU VM or a container platform.
@@ -119,6 +115,16 @@ web (FastAPI + UI) ──► Postgres: songs, progress events, job queue ◄─�
   CoreWeave, or local processes). Runner jobs report to the web API with a per-song token.
 - **Every take is saved as soon as it's sung**, and every loop step is a progress event the UI polls.
 - **Weave tracing** is on when `WEAVE_PROJECT` is set.
+
+### What has actually run
+
+| Piece | Status |
+|---|---|
+| Web app, Postgres queue, storage, UI | Run in Docker Compose with fake models; songs finish end to end |
+| Dispatcher with local process jobs | Run in tests; jobs report over HTTP, crashed jobs are retried then failed |
+| Worker with real models on a GPU Droplet | Written; GPU image not built, no real song yet |
+| Modal and CoreWeave runners | Tested against stand-ins for their SDKs; no real sandbox started yet |
+| Web app on DigitalOcean App Platform | Planned |
 
 ## Layout
 
