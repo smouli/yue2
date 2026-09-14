@@ -69,4 +69,3 @@ The same table is saved as `docs/rubric.png` for slides and the submission page.
 - **Best of 3 takes:** average of the song's clarity and its worst line, so one garbled line can't hide behind a good average.
 - **Best pass:** heard clearly × faithful to the text.
 - **No LLM grades these three scores.** Whisper and SheetSage2 are models, but the scores themselves are computed by code.
-- **Summary mode** adds LLM-based scores (facts taught via a quiz, naturalness via a judge); those are the ones the rule A/B tests use.
