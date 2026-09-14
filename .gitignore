@@ -11,3 +11,5 @@ song.*
 *.abc
 .claude/settings.local.json
 results/
+*.egg-info/
+.pytest_cache/

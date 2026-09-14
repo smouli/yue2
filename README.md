@@ -17,7 +17,7 @@ paragraph ──► TEXT PASSES (seconds, up to 4)
               score: syllable fit · faithful to the text  ──► feedback ──► rewrite
                         │ best draft
               RENDER PASSES (minutes, up to 3)
-              YuE2 sings 3 takes in parallel (new seeds each pass) on a marimo molab GPU
+              YuE2 sings 3 takes in parallel (new seeds each pass) on a GPU worker
               Whisper checks every line; keep the clearest take; SheetSage2 melody guardrail
               lock clear lines ──► send misheard lines back with what was heard
                         │ best pass (heard clearly × faithful)
@@ -63,41 +63,75 @@ scores is graded by an LLM.
   the same song. Fixed with new seeds per pass and feedback that respects faithfulness.
 
 ### Not finished
+- **The playbook and bake-off live only in `molab/`.** The `yue2` package and web app run the loop without learned
+  rules for now.
 - **The playbook experiments need a rerun.** The earlier runs scored rules with a fact-quiz mode that has since been
   removed; the rule A/B tests now use syllable fit and faithfulness, and have not been run yet.
 - **The writer bake-off needs a rerun** on faithful-mode scores; Gemma 4 31B was chosen under the old scores.
 - **No model weights were trained.** The loop learns rules, not parameters. Next step: fine-tune a small writer
   on the loop's best lyrics and serve it as a LoRA on W&B Inference.
 
+## Run it
+
+**On a laptop, no GPU.** Fake models stand in for the singer and listener, so the whole flow (submit, live
+passes, sing-along player) runs in a couple of seconds per song:
+
+```bash
+docker compose up --build
+```
+
+Open http://localhost:8080. Add `LLM_API_KEY` to `.env` (from [`.env.example`](.env.example)) to use a real lyric
+writer; without one a simple no-LLM writer fills the lines.
+
+**On a GPU.** The worker runs YuE2, Whisper and SheetSage2, each in its own environment:
+
+```bash
+docker compose -f compose.yml -f compose.gpu.yml up -d --build
+```
+
+**On DigitalOcean.** One GPU Droplet with a bootstrap script, plus Serverless Inference for the writer and
+Spaces for storage: [deploy/digitalocean](deploy/digitalocean/README.md).
+
+**Tests:**
+
+```bash
+uv run --no-project --python 3.12 --with-editable . --with pytest --with httpx pytest
+```
+
+Queue tests need Postgres (`DATABASE_URL`) and skip without it.
+
+## How it's built
+
+```
+web (FastAPI + UI) ──► Postgres: songs, progress events, job queue ◄── worker(s) ──► writer API
+        └────────────── storage: local folder or S3-compatible bucket ◄───┘
+```
+
+- **Settings come from the environment** ([yue2/config.py](yue2/config.py)), so the same images run on a laptop,
+  a GPU VM or a container platform.
+- **The queue is Postgres** (`FOR UPDATE SKIP LOCKED`, heartbeats, retry of abandoned songs): add workers on any
+  machine that can reach the database and storage.
+- **Every take is saved as soon as it's sung**, and every loop step is a progress event the UI polls.
+- **Weave tracing** is on when `WEAVE_PROJECT` is set.
+
 ## Layout
 
 | Path | What |
 |---|---|
-| `sandbox/loop.py` | the loop (`run_faithful`): song plan, text and render passes, best-of-N takes |
-| `sandbox/pipeline.py` | YuE2 render, syllable fit, SheetSage2 melody check, Whisper intelligibility (each model in its own venv) |
-| `sandbox/faithful.py` | faithfulness score, number normalization, source-word spans for karaoke |
-| `sandbox/melody.py` | melody profile: sections and phrases detected from the transcription; tempo control |
-| `sandbox/asr_score.py` | Whisper transcript vs. intended lyrics, per line, with sung time spans |
-| `sandbox/playbook.py`, `batch.py`, `experiment.sh` | coach, A/B-gated rule learning, batch runs logged as Weave evaluations |
-| `sandbox/bakeoff.py` | Weave Evaluation of open-weight lyric writers on W&B Inference |
-| `sandbox/singalong.py` | anywidget karaoke player |
-| `notebook.py` | molab notebook with the demo UI (mode switch, paragraph picker, live progress, player) |
-| `sandbox/demo_video.py`, `talk_segment.py` | demo video renderer (PIL + ffmpeg) and the Under the hood block |
-| `tools/final_cut.py` | assembles the final video with the facecam recording, placed by word timestamps |
-| `docs/demo-script.md` | voiceover script and rubric reference |
-| `docs/rubric.png` | the rubric as an image |
-| `docs/scoring-pipeline.svg` | diagram of how each score is computed |
-| `sandbox/setup.sh`, `setup_asr.sh`, `transcribe.sh` | sandbox installs and source-track transcription |
-
-## Setup
-
-1. Open a notebook on [molab](https://molab.marimo.io/), attach the GPU, and choose **Pair with an agent**.
-2. `cp .env.example .env` and fill in `WANDB_API_KEY` and `MARIMO_TOKEN`.
-3. On the sandbox: `sandbox/setup.sh`, `sandbox/setup_asr.sh`, then `sandbox/transcribe.sh` on your source track.
-
-molab sets `PYTHONSAFEPATH=1` and a kernel `PYTHONPATH` that leak into subprocess venvs, so sandbox scripts run
-with `env -u PYTHONPATH -u PYTHONSAFEPATH`. molab sessions end after 12 hours (or 90 idle minutes) and take the
-work folder with them; back up renders you want to keep.
+| `yue2/loop.py` | the loop: song plan, text passes, render passes, best-of-N takes |
+| `yue2/writer.py`, `yue2/llm.py` | lyric writer prompt and feedback; any OpenAI-compatible endpoint |
+| `yue2/text/` | syllable fit and faithfulness scores, source-word spans for the sing-along |
+| `yue2/melody.py` | melody profile: sections and phrases from the transcription; tempo control |
+| `yue2/models/` | YuE2, Whisper and SheetSage2 behind one interface (`local`), and stand-ins (`fake`) |
+| `yue2/db.py`, `yue2/worker.py` | Postgres job queue and the worker that runs songs |
+| `yue2/api/` | FastAPI app and the single-page UI |
+| `yue2/storage.py` | local folder or S3-compatible storage |
+| `Dockerfile`, `docker/worker-gpu.Dockerfile`, `compose*.yml` | images and the Compose stack |
+| `deploy/digitalocean/` | GPU Droplet guide and bootstrap script |
+| `tests/` | scores, melody plan, fake end-to-end loop, queue and API |
+| `molab/` | the original marimo notebooks and sandbox scripts, including the playbook and writer bake-off experiments |
+| `tools/video/` | demo video renderer |
+| `docs/` | scoring diagram and rubric |
 
 ## Licenses and rights
 
