@@ -1,0 +1,21 @@
+# GPU override: real models on an NVIDIA GPU (e.g. a DigitalOcean L40S Droplet).
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker-gpu.Dockerfile
+    environment:
+      YUE2_MODELS: local
+    volumes:
+      - data:/data
+      - models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  models:

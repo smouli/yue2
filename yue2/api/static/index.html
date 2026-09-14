@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yue2 · Listen to what you read</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <a href="#/" class="brand">yue2</a>
+    <span class="tagline">Listen to what you read</span>
+  </header>
+
+  <main class="layout">
+    <section class="panel compose" aria-labelledby="compose-title">
+      <h1 id="compose-title">Sing a paragraph</h1>
+      <p class="muted">Paste a page or a paragraph. The loop sets its own words to <em>Island in the Sun</em>, sings it,
+        listens back, and rewrites whatever it can't hear clearly.</p>
+
+      <form id="page-form" class="row">
+        <label class="sr-only" for="page-url">Page URL</label>
+        <input id="page-url" type="url" placeholder="https://en.wikipedia.org/wiki/…" required>
+        <button type="submit" class="secondary">Load paragraphs</button>
+      </form>
+      <div id="paragraphs" class="paragraphs" hidden></div>
+
+      <form id="song-form">
+        <label for="source">Paragraph to sing</label>
+        <textarea id="source" rows="7" placeholder="…or paste a paragraph (40–110 words sings best)" required></textarea>
+        <div class="row between">
+          <span id="word-count" class="muted small">0 words</span>
+          <label class="inline small">Takes per pass
+            <select id="takes"><option>1</option><option>2</option><option selected>3</option><option>4</option></select>
+          </label>
+        </div>
+        <button type="submit" class="primary" id="submit">Make the song</button>
+        <p id="form-error" class="error" role="alert" hidden></p>
+      </form>
+
+      <h2 class="history-title">Recent songs</h2>
+      <ul id="history" class="history"><li class="muted small">Loading…</li></ul>
+    </section>
+
+    <section class="panel stage" id="stage" aria-live="polite">
+      <div class="empty">
+        <p class="big">🎧</p>
+        <p>Your song's progress and the sing-along player will appear here.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>
