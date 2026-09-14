@@ -1,0 +1,20 @@
+# Images only need pyproject.toml and yue2/; keep secrets, recordings and bulky folders out of the build context.
+.git
+.env
+.env.*
+!.env.example
+.venv
+.yue2
+results
+molab
+tools
+docs
+tests
+__marimo__
+*.egg-info
+.pytest_cache
+song.*
+*.mp3
+*.wav
+*.mov
+*.mp4

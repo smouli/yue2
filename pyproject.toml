@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yue2"
+version = "0.2.0"
+description = "Sing what you read: set a paragraph's own words to a melody, listen back, and fix what isn't clear."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "psycopg[binary]>=3.2",
+    "boto3>=1.35",
+    "openai>=1.60",
+    "trafilatura>=2.0",
+    "pronouncing>=0.2",
+]
+
+[project.optional-dependencies]
+tracing = ["weave>=0.52"]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[tool.setuptools.packages.find]
+include = ["yue2*"]
+
+[tool.setuptools.package-data]
+"yue2.api" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["db: needs a Postgres database at DATABASE_URL"]

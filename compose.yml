@@ -1,0 +1,61 @@
+# Local stack: Postgres, the web app, and a worker. With no GPU the worker uses fake models, so the whole flow
+# (submit, progress, player) runs on a laptop:
+#   docker compose up --build        → http://localhost:8080
+# On a GPU machine add the override:
+#   docker compose -f compose.yml -f compose.gpu.yml up -d --build
+name: yue2
+
+x-app-env: &app-env
+  DATABASE_URL: ${DATABASE_URL:-postgresql://yue2:yue2@db:5432/yue2}
+  YUE2_HOME: /data
+  YUE2_STORAGE_DIR: /data/storage
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: yue2
+      POSTGRES_PASSWORD: yue2
+      POSTGRES_DB: yue2
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yue2"]
+      interval: 3s
+      retries: 20
+
+  web:
+    build: .
+    command: ["python", "-m", "yue2", "api"]
+    env_file:
+      - path: .env
+        required: false
+    environment: *app-env
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    volumes:
+      - data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["python", "-m", "yue2", "worker"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *app-env
+      YUE2_MODELS: ${YUE2_MODELS:-fake}
+    volumes:
+      - data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  data:
