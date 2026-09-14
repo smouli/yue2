@@ -56,6 +56,24 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Instead of the worker: one-off GPU jobs on Modal or CoreWeave (docker compose --profile sandboxes up -d).
+  # Needs YUE2_RUNNER, YUE2_RUNNER_SECRET, YUE2_API_URL, YUE2_WORKER_IMAGE and S3 storage in .env; see deploy/sandboxes.
+  dispatcher:
+    profiles: [sandboxes]
+    build:
+      context: .
+      args:
+        EXTRAS: "[modal,coreweave]"
+    command: ["python", "-m", "yue2", "dispatch"]
+    env_file:
+      - path: .env
+        required: false
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
   data:

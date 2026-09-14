@@ -2,12 +2,12 @@
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from yue2 import db, loop, storage
+from yue2 import db, loop, report, storage
 from yue2.config import Settings
 from yue2.text import faithful
 
@@ -78,6 +78,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if found["status"] == "queued":
                 found["queue_ahead"] = db.queue_position(c, song_id)
         return found
+
+    # One-off GPU jobs report here with a token for their song and attempt (see yue2/report.py).
+    def job(c, song_id: str, authorization: str | None) -> None:
+        token = (authorization or "").removeprefix("Bearer ").strip()
+        try:
+            current = db.attempt(c, song_id)
+        except Exception:
+            current = None
+        if not current or not report.check_token(settings.runner_secret, song_id, current["attempts"], token):
+            raise HTTPException(403, "This job isn't running that song.")
+        if current["status"] != "running":
+            raise HTTPException(409, f"The song is {current['status']}.")
+
+    @app.post("/api/runner/songs/{song_id}/start")
+    def job_start(song_id: str, authorization: str | None = Header(None)):
+        with conn() as c:
+            job(c, song_id, authorization)
+            db.restart(c, song_id)
+            song = db.get(c, song_id)
+        return {k: song[k] for k in ("id", "source", "url", "takes")}
+
+    @app.post("/api/runner/songs/{song_id}/events")
+    def job_event(song_id: str, data: dict = Body(...), authorization: str | None = Header(None)):
+        with conn() as c:
+            job(c, song_id, authorization)
+            db.add_event(c, song_id, data)
+        return {"ok": True}
+
+    @app.post("/api/runner/songs/{song_id}/heartbeat")
+    def job_heartbeat(song_id: str, authorization: str | None = Header(None)):
+        with conn() as c:
+            job(c, song_id, authorization)
+            db.heartbeat(c, song_id)
+        return {"ok": True}
+
+    @app.post("/api/runner/songs/{song_id}/finish")
+    def job_finish(song_id: str, result: dict = Body(...), authorization: str | None = Header(None)):
+        with conn() as c:
+            job(c, song_id, authorization)
+            db.finish(c, song_id, result)
+        return {"ok": True}
+
+    @app.post("/api/runner/songs/{song_id}/fail")
+    def job_fail(song_id: str, body: dict = Body(...), authorization: str | None = Header(None)):
+        with conn() as c:
+            job(c, song_id, authorization)
+            db.fail(c, song_id, str(body.get("error") or "unknown error"))
+        return {"ok": True}
 
     @app.get("/api/paragraphs")
     def paragraphs(url: str):

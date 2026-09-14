@@ -50,6 +50,24 @@ class Settings:
     takes: int
     bpm: int
 
+    # One-off GPU jobs (python -m yue2 dispatch): "process" (local, for development), "modal" or "coreweave"
+    runner: str
+    api_url: str  # the web app's address as the jobs see it; they report progress there
+    runner_secret: str  # signs per-song tokens; the web app and the dispatcher need the same value
+    song_token: str  # set by the dispatcher inside a job
+    max_parallel: int
+    job_timeout: int
+    fetch_models: bool  # download weights at job start (no persistent volume)
+    worker_image: str  # the GPU worker image in a registry; Modal can build docker/worker-gpu.Dockerfile instead
+    worker_python: str
+    modal_app: str
+    modal_gpu: str
+    modal_volume: str
+    cwsandbox_gpu_type: str
+    cwsandbox_gpu_memory_gb: int
+    cwsandbox_volume_id: str
+    cwsandbox_auth: str
+
     @classmethod
     def from_env(cls) -> "Settings":
         home = Path(_env("YUE2_HOME", str(Path.home() / ".yue2"))).expanduser()
@@ -81,6 +99,22 @@ class Settings:
             weave_project=_env("WEAVE_PROJECT"),
             takes=int(_env("YUE2_TAKES", "3")),
             bpm=int(_env("YUE2_BPM", "90")),
+            runner=_env("YUE2_RUNNER", "process"),
+            api_url=_env("YUE2_API_URL", "http://localhost:8080").rstrip("/"),
+            runner_secret=_env("YUE2_RUNNER_SECRET"),
+            song_token=_env("YUE2_SONG_TOKEN"),
+            max_parallel=int(_env("YUE2_MAX_PARALLEL", "2")),
+            job_timeout=int(_env("YUE2_JOB_TIMEOUT", "3600")),
+            fetch_models=_env("YUE2_FETCH_MODELS") in ("1", "true", "yes"),
+            worker_image=_env("YUE2_WORKER_IMAGE"),
+            worker_python=_env("YUE2_WORKER_PYTHON", "/opt/venvs/app/bin/python"),
+            modal_app=_env("MODAL_APP", "yue2"),
+            modal_gpu=_env("MODAL_GPU", "L40S"),
+            modal_volume=_env("MODAL_VOLUME", "yue2-models"),
+            cwsandbox_gpu_type=_env("CWSANDBOX_GPU_TYPE"),
+            cwsandbox_gpu_memory_gb=int(_env("CWSANDBOX_GPU_MEMORY_GB", "40")),
+            cwsandbox_volume_id=_env("CWSANDBOX_VOLUME_ID"),
+            cwsandbox_auth=_env("CWSANDBOX_AUTH", "coreweave"),
         )
 
     @property

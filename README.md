@@ -92,6 +92,9 @@ docker compose -f compose.yml -f compose.gpu.yml up -d --build
 **On DigitalOcean.** One GPU Droplet with a bootstrap script, plus Serverless Inference for the writer and
 Spaces for storage: [deploy/digitalocean](deploy/digitalocean/README.md).
 
+**On Modal or CoreWeave sandboxes.** A dispatcher starts one GPU sandbox per song, so you pay only while songs
+are being made: [deploy/sandboxes](deploy/sandboxes/README.md).
+
 **Tests:**
 
 ```bash
@@ -104,6 +107,7 @@ Queue tests need Postgres (`DATABASE_URL`) and skip without it.
 
 ```
 web (FastAPI + UI) ──► Postgres: songs, progress events, job queue ◄── worker(s) ──► writer API
+        │                                                  ◄── or dispatcher ──► a sandbox per song
         └────────────── storage: local folder or S3-compatible bucket ◄───┘
 ```
 
@@ -111,6 +115,8 @@ web (FastAPI + UI) ──► Postgres: songs, progress events, job queue ◄─�
   a GPU VM or a container platform.
 - **The queue is Postgres** (`FOR UPDATE SKIP LOCKED`, heartbeats, retry of abandoned songs): add workers on any
   machine that can reach the database and storage.
+- **Always-on or per song:** a worker claims songs itself; the dispatcher hands each song to a runner (Modal,
+  CoreWeave, or local processes). Runner jobs report to the web API with a per-song token.
 - **Every take is saved as soon as it's sung**, and every loop step is a progress event the UI polls.
 - **Weave tracing** is on when `WEAVE_PROJECT` is set.
 
@@ -123,12 +129,15 @@ web (FastAPI + UI) ──► Postgres: songs, progress events, job queue ◄─�
 | `yue2/text/` | syllable fit and faithfulness scores, source-word spans for the sing-along |
 | `yue2/melody.py` | melody profile: sections and phrases from the transcription; tempo control |
 | `yue2/models/` | YuE2, Whisper and SheetSage2 behind one interface (`local`), and stand-ins (`fake`) |
-| `yue2/db.py`, `yue2/worker.py` | Postgres job queue and the worker that runs songs |
+| `yue2/db.py`, `yue2/worker.py` | Postgres job queue; the worker, and `run-song` for one song in a job |
+| `yue2/dispatcher.py`, `yue2/runners/` | one-off jobs per song on Modal, CoreWeave or local processes |
+| `yue2/report.py` | where progress goes: Postgres, or the web API with a per-song token |
 | `yue2/api/` | FastAPI app and the single-page UI |
 | `yue2/storage.py` | local folder or S3-compatible storage |
 | `Dockerfile`, `docker/worker-gpu.Dockerfile`, `compose*.yml` | images and the Compose stack |
 | `deploy/digitalocean/` | GPU Droplet guide and bootstrap script |
-| `tests/` | scores, melody plan, fake end-to-end loop, queue and API |
+| `deploy/sandboxes/` | Modal and CoreWeave sandbox guide |
+| `tests/` | scores, melody plan, fake end-to-end loop, queue, API, runners and dispatcher |
 | `molab/` | the original marimo notebooks and sandbox scripts, including the playbook and writer bake-off experiments |
 | `tools/video/` | demo video renderer |
 | `docs/` | scoring diagram and rubric |

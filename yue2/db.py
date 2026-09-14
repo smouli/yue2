@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS song_events (
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (song_id, seq)
 );
+ALTER TABLE songs ADD COLUMN IF NOT EXISTS runner_ref text;
 """
 
 MAX_ATTEMPTS = 2
@@ -63,10 +64,35 @@ def claim(conn, worker: str) -> dict | None:
         WHERE status = 'running' AND heartbeat_at < now() - interval '{STALE_AFTER}'""")
     return conn.execute("""
         UPDATE songs SET status = 'running', worker = %s, attempts = attempts + 1,
-               started_at = now(), heartbeat_at = now(), error = NULL
+               started_at = now(), heartbeat_at = now(), error = NULL, runner_ref = NULL
         WHERE id = (SELECT id FROM songs WHERE status = 'queued' ORDER BY created_at
                     FOR UPDATE SKIP LOCKED LIMIT 1)
         RETURNING *""", (worker,)).fetchone()
+
+
+def set_runner_ref(conn, song_id: str, ref: str) -> None:
+    """The one-off job (sandbox or process) running this song."""
+    conn.execute("UPDATE songs SET runner_ref = %s WHERE id = %s", (ref, song_id))
+
+
+def running_on(conn, worker: str) -> list[dict]:
+    return conn.execute("SELECT id, attempts, runner_ref FROM songs WHERE status = 'running' AND worker = %s",
+                        (worker,)).fetchall()
+
+
+def attempt(conn, song_id: str) -> dict | None:
+    return conn.execute("SELECT status, attempts FROM songs WHERE id = %s", (song_id,)).fetchone()
+
+
+def retry_or_fail(conn, song_id: str, error: str) -> str | None:
+    """A song whose job died goes back in the queue, or fails once it has used its attempts."""
+    row = conn.execute(f"""
+        UPDATE songs SET status = CASE WHEN attempts >= {MAX_ATTEMPTS} THEN 'failed' ELSE 'queued' END,
+               error = %s, runner_ref = NULL,
+               finished_at = CASE WHEN attempts >= {MAX_ATTEMPTS} THEN now() END
+        WHERE id = %s AND status = 'running'
+        RETURNING status""", (error[:2000], song_id)).fetchone()
+    return row["status"] if row else None
 
 
 def heartbeat(conn, song_id: str) -> None:
@@ -119,5 +145,6 @@ def queue_position(conn, song_id: str) -> int:
     return row["ahead"]
 
 
-__all__ = ["connect", "init_schema", "create_song", "claim", "heartbeat", "add_event", "restart", "finish", "fail",
+__all__ = ["connect", "init_schema", "create_song", "claim", "set_runner_ref", "running_on", "attempt", "retry_or_fail",
+           "heartbeat", "add_event", "restart", "finish", "fail",
            "get", "recent", "queue_position"]

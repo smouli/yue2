@@ -37,13 +37,14 @@ def test_claim_is_exclusive_and_in_order(conn):
 def test_worker_processes_a_song(conn, settings):
     from dataclasses import replace
 
-    from yue2 import db, storage, worker
+    from yue2 import db, report, storage, worker
     from yue2.models.fake import FakeModels
 
     settings = replace(settings, database_url=os.environ["DATABASE_URL"])
     song_id = db.create_song(conn, PARAGRAPH, "https://en.wikipedia.org/wiki/Industrial_Revolution", 2)
     song = db.claim(conn, "test")
-    worker.process(settings, conn, storage.load(settings), FakeModels(), None, song)
+    worker.process(settings, report.DbReporter(settings.database_url, song["id"]), storage.load(settings), FakeModels(),
+                   None)
     found = db.get(conn, song_id)
     assert found["status"] == "done", found["error"]
     assert found["events"][0]["step"] == "setup" and found["events"][-1]["step"] == "done"
